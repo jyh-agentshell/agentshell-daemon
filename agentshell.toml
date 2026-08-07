@@ -1,0 +1,36 @@
+# AgentShell 守护进程配置模板
+# 安装后此文件位于 ~/.agentshell/agentshell.toml
+
+[monitor]
+# 终端复用器类型: tmux | screen | zellij | pty
+type = "tmux"
+# 监控的会话名 glob 模式
+session_pattern = "*"
+# 轮询间隔（毫秒）
+poll_interval_ms = 500
+
+[reporting]
+# .NET 网关 API 地址
+api_base_url = "https://api.agentshell.dev/v1"
+# 上报间隔（毫秒）
+report_interval_ms = 1000
+
+[lan]
+# 是否启用局域网直连模式
+enabled = true
+# 内嵌 Kestrel 监听端口
+port = 11920
+# 绑定的网络接口（空 = 自动检测局域网 IP + 127.0.0.1）
+bind_ip = ""
+
+[binding]
+# Ed25519 密钥对存储路径
+key_path = "~/.agentshell/agent.key"
+# 绑定码有效期（秒）
+code_ttl_seconds = 300
+
+[logging]
+# 日志级别: Trace | Debug | Information | Warning | Error | Critical
+level = "Information"
+# 日志文件路径（空 = 仅控制台输出）
+file_path = "~/.agentshell/daemon.log"

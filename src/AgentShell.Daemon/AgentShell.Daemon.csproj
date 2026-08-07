@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RootNamespace>AgentShell.Daemon</RootNamespace>
+    <AssemblyName>agentshell-daemon</AssemblyName>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- 自包含发布配置 -->
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <PublishTrimmed>true</PublishTrimmed>
+    <TrimMode>partial</TrimMode>
+
+    <!-- 发布元数据 -->
+    <Description>AgentShell 守护进程 —— AI 编码代理的服务器端监控程序</Description>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <RepositoryUrl>https://github.com/agentshell/agentshell-daemon</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- AgentShell 协议模型（NuGet 引用） -->
+    <!-- 实际发布时取消注释，本地开发用项目引用 -->
+    <!-- <PackageReference Include="AgentShell.Protocol" Version="0.1.0" /> -->
+    <ProjectReference Include="..\..\..\agentshell-protocol\src\AgentShell.Protocol\AgentShell.Protocol.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="10.0.0" />
+    <PackageReference Include="Tomlyn" Version="0.18.0" />
+  </ItemGroup>
+
+</Project>

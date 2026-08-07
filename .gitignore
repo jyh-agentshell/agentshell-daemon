@@ -1,0 +1,18 @@
+# .NET
+bin/
+obj/
+*.nupkg
+*.snupkg
+*.user
+*.suo
+*.cache
+publish/
+
+# IDE
+.idea/
+.vs/
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db

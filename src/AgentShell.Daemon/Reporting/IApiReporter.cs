@@ -1,0 +1,35 @@
+using AgentShell.Protocol.Models;
+
+namespace AgentShell.Daemon.Reporting;
+
+/// <summary>
+/// Agent 状态上报客户端接口。
+/// 实现类负责通过 HTTPS 将状态事件发送到 .NET 网关。
+/// </summary>
+public interface IApiReporter
+{
+    /// <summary>上报 Agent 状态变化</summary>
+    Task ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default);
+
+    /// <summary>上报会话生命周期事件</summary>
+    Task ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default);
+
+    /// <summary>检查网关连接是否正常</summary>
+    Task<bool> PingAsync(CancellationToken ct = default);
+}
+
+/// <summary>
+/// 空操作上报器。在 API 网关尚未部署时使用，所有上报操作静默成功。
+/// Phase 2 替换为真实 HTTP 客户端实现。
+/// </summary>
+public sealed class NoOpReporter : IApiReporter
+{
+    public Task ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
+        => Task.CompletedTask;
+
+    public Task ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default)
+        => Task.CompletedTask;
+
+    public Task<bool> PingAsync(CancellationToken ct = default)
+        => Task.FromResult(true);
+}
