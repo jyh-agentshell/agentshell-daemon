@@ -43,20 +43,52 @@ public sealed class TmuxMonitor : IMonitorTarget
         }
     }
 
+    // tmux 会话名允许的字符集：字母、数字、点、下划线、短横线
+    private static readonly System.Text.RegularExpressions.Regex ValidSessionPattern =
+        new(@"^[a-zA-Z0-9._\-]+$",
+            System.Text.RegularExpressions.RegexOptions.Compiled,
+            TimeSpan.FromMilliseconds(100));
+
+    /// <summary>
+    /// 验证并净化会话名，防止命令注入。
+    /// 如果会话名包含非法字符，返回空字符串并记日志。
+    /// </summary>
+    private string SanitizeSessionName(string sessionName)
+    {
+        if (string.IsNullOrWhiteSpace(sessionName))
+        {
+            _logger.LogWarning("会话名为空，拒绝操作");
+            return string.Empty;
+        }
+
+        var trimmed = sessionName.Trim();
+        if (!ValidSessionPattern.IsMatch(trimmed))
+        {
+            _logger.LogWarning("会话名包含非法字符，拒绝操作: {SessionName}", trimmed);
+            return string.Empty;
+        }
+
+        return trimmed;
+    }
+
     /// <inheritdoc />
     public async Task<string> CapturePaneAsync(string sessionName, CancellationToken ct = default)
     {
         try
         {
+            var safe = SanitizeSessionName(sessionName);
+            if (string.IsNullOrEmpty(safe))
+                return string.Empty;
+
             var result = await RunTmuxAsync(
-                $"capture-pane -p -t \"{sessionName}\" -S -200",
+                $"capture-pane -p -t \"{safe}\" -S -200",
                 ct);
             IsHealthy = result.ExitCode == 0;
             return result.ExitCode == 0 ? result.Stdout : string.Empty;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "捕获 tmux 会话 {SessionName} 屏幕失败", sessionName);
+            _logger.LogWarning(ex, "捕获 tmux 会话屏幕失败");
             IsHealthy = false;
             return string.Empty;
         }
@@ -67,19 +99,23 @@ public sealed class TmuxMonitor : IMonitorTarget
     {
         try
         {
+            var safe = SanitizeSessionName(sessionName);
+            if (string.IsNullOrEmpty(safe))
+                return;
+
             // 对按键序列进行 tmux 安全转义
             var escaped = keys
                 .Replace(";", "\\;")
                 .Replace("\n", "Enter");
 
             var result = await RunTmuxAsync(
-                $"send-keys -t \"{sessionName}\" \"{escaped}\"",
+                $"send-keys -t \"{safe}\" \"{escaped}\"",
                 ct);
             IsHealthy = result.ExitCode == 0;
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "向 tmux 会话 {SessionName} 发送按键失败", sessionName);
+            _logger.LogWarning(ex, "向 tmux 会话发送按键失败");
             IsHealthy = false;
         }
     }
