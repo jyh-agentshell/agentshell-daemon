@@ -6,17 +6,24 @@
 
 ## 核心功能
 
-- **多路复用器监控**: 通过 `IMonitorTarget` 接口支持 tmux、screen、zellij、pty
+### 已实现（Phase 1）
+
+- **多路复用器监控**: 通过 `IMonitorTarget` 接口适配 tmux（screen/zellij/pty 预留接口）
 - **双路径状态检测**: ANSI OSC 结构化标记（优先） + 正则回退
+- **配置系统**: `agentshell.toml` + Tomlyn 解析，静默回退默认值
+- **零依赖部署**: `dotnet publish --self-contained` 编译为单文件二进制
+
+### 规划中（Phase 2+）
+
 - **安全绑定**: Ed25519 密钥对 + 挑战-应答验证设备所有权
+- **HTTPS 上报**: 通过 `IApiReporter` 接口上报到 AgentShell 网关（当前 `NoOpReporter` 占位）
 - **局域网直连**: 内嵌 Kestrel HTTP Server + mDNS 广播
 - **自更新**: GitHub Releases HTTPS + SHA256 校验 + rename-and-restart
-- **零依赖部署**: `dotnet publish --self-contained -p:PublishSingleFile=true` 编译为单文件二进制
 
 ## 安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/agentshell/agentshell-daemon/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/jyh-agentshell/agentshell-daemon/main/install.sh | bash
 ```
 
 安装脚本做三件事：

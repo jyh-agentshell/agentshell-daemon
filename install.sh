@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # AgentShell 守护进程一键安装脚本
-# 用法: curl -fsSL https://raw.githubusercontent.com/agentshell/agentshell-daemon/main/install.sh | bash
+# 用法: curl -fsSL https://raw.githubusercontent.com/jyh-agentshell/agentshell-daemon/main/install.sh | bash
 #
 # 此脚本做三件事：
 # 1. 从 GitHub Releases 下载最新二进制
@@ -10,7 +10,7 @@
 set -euo pipefail
 
 # ─── 配置 ───────────────────────────────────────────────
-REPO="agentshell/agentshell-daemon"
+REPO="jyh-agentshell/agentshell-daemon"
 INSTALL_DIR="/usr/local/bin"
 CONFIG_DIR="${HOME}/.agentshell"
 BINARY_NAME="agentshell-daemon"

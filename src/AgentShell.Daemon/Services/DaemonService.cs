@@ -25,6 +25,16 @@ public sealed class DaemonService : BackgroundService
     private string? _currentSessionId;
     private AgentState _currentAgentState = AgentState.Idle;
     private AgentType _currentAgentType = AgentType.None;
+    private StateSource _currentSource = StateSource.OscMarker;
+
+    // CLI 工具进程名/提示符映射
+    private static readonly Dictionary<string, AgentType> AgentProcessMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["codex"] = AgentType.Codex,
+        ["claude"] = AgentType.Claude,
+        ["ocode"] = AgentType.OpenCode,
+        ["aider"] = AgentType.Aider
+    };
 
     // 正则模式（回退路径：匹配常见 CLI 审批提示）
     private static readonly System.Text.RegularExpressions.Regex ApprovalPattern = new(
@@ -94,25 +104,32 @@ public sealed class DaemonService : BackgroundService
         if (string.IsNullOrEmpty(screenContent)) return;
 
         // 双路径检测
-        var (newState, detail) = DetectState(screenContent);
+        var (newState, detail, source) = DetectState(screenContent);
 
-        // 状态变更时上报
+        // 状态变更时更新追踪
         if (sessionId != _currentSessionId || newState != _currentAgentState)
         {
             _logger.LogInformation("状态变更: {SessionId} → {State}（来源: {Source}）",
-                sessionId, newState, detail?.Source);
+                sessionId, newState, source);
 
             _currentSessionId = sessionId;
             _currentAgentState = newState;
+            _currentSource = source;
 
-            // 上报事件（在 ReportLoop 中执行以避免阻塞）
+            // 自动探测 Agent 类型
+            if (newState != AgentState.Idle && _currentAgentType == AgentType.None)
+            {
+                _currentAgentType = DetectAgentType(screenContent);
+                if (_currentAgentType != AgentType.None)
+                    _logger.LogInformation("检测到 Agent: {AgentType}", _currentAgentType);
+            }
         }
     }
 
     /// <summary>
     /// 双路径状态检测：ANSI OSC 标记优先，正则回退。
     /// </summary>
-    private (AgentState NewState, AgentStateDetail? Detail) DetectState(string content)
+    private (AgentState NewState, AgentStateDetail? Detail, StateSource Source) DetectState(string content)
     {
         // 路径 A：ANSI OSC 结构化标记
         var oscResult = TryParseOscMarker(content);
@@ -123,9 +140,8 @@ public sealed class DaemonService : BackgroundService
             {
                 Message = oscResult.Value.message,
                 Prompt = oscResult.Value.prompt,
-                FileCount = oscResult.Value.fileCount,
-                Source = StateSource.OscMarker
-            });
+                FileCount = oscResult.Value.fileCount
+            }, StateSource.OscMarker);
         }
 
         // 路径 B：正则回退
@@ -135,12 +151,11 @@ public sealed class DaemonService : BackgroundService
             _logger.LogTrace("状态检测: 正则回退 → AwaitingApproval");
             return (AgentState.AwaitingApproval, new AgentStateDetail
             {
-                Message = "检测到审批提示",
-                Source = StateSource.RegexFallback
-            });
+                Message = "检测到审批提示"
+            }, StateSource.RegexFallback);
         }
 
-        return (AgentState.Idle, null);
+        return (AgentState.Idle, null, StateSource.OscMarker);
     }
 
     /// <summary>
@@ -215,7 +230,8 @@ public sealed class DaemonService : BackgroundService
         {
             try
             {
-                if (_currentSessionId != null && _currentAgentType != AgentType.None)
+                // 有活跃会话即上报，不要求 Agent 类型已知
+                if (_currentSessionId != null)
                 {
                     var evt = new AgentStateEvent
                     {
@@ -224,7 +240,7 @@ public sealed class DaemonService : BackgroundService
                         SessionId = _currentSessionId,
                         AgentType = _currentAgentType,
                         State = _currentAgentState,
-                        Source = StateSource.OscMarker,
+                        Source = _currentSource,
                         DaemonVersion = _daemonVersion
                     };
 
@@ -238,6 +254,42 @@ public sealed class DaemonService : BackgroundService
 
             await Task.Delay(_config.Reporting.ReportIntervalMs, ct);
         }
+    }
+
+    /// <summary>
+    /// 检测终端内容中正在运行的 Agent CLI 工具类型。
+    /// 通过查找已知 CLI 的进程名或提示符特征来推断。
+    /// </summary>
+    private AgentType DetectAgentType(string content)
+    {
+        // 检查终端内容中的已知 CLI 提示符特征
+        var lower = content.ToLowerInvariant();
+        foreach (var (keyword, agentType) in AgentProcessMap)
+        {
+            if (lower.Contains(keyword))
+                return agentType;
+        }
+
+        // 通过 OSC 标记中的 agent 类型字段检测
+        foreach (var line in content.Split('\n'))
+        {
+            if (line.Contains("agent_type="))
+            {
+                var idx = line.IndexOf("agent_type=", StringComparison.Ordinal);
+                if (idx >= 0)
+                {
+                    var valStart = idx + "agent_type=".Length;
+                    var valEnd = line.IndexOf(';', valStart);
+                    if (valEnd < 0) valEnd = line.IndexOf('\a', valStart);
+                    if (valEnd < 0) valEnd = line.Length;
+                    var val = line[valStart..valEnd].Trim();
+                    if (AgentProcessMap.TryGetValue(val, out var detected))
+                        return detected;
+                }
+            }
+        }
+
+        return AgentType.Unknown;
     }
 
     private static string? DecodeBase64(string? value)

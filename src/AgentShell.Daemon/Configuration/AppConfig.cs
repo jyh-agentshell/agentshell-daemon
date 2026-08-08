@@ -6,7 +6,7 @@ namespace AgentShell.Daemon.Configuration;
 /// <summary>
 /// 守护进程完整配置（与 agentshell.toml 对应）
 /// </summary>
-public sealed class AppConfig
+public sealed record AppConfig
 {
     /// <summary>配置文件路径</summary>
     public static string DefaultPath =>
@@ -49,25 +49,25 @@ public sealed class AppConfig
         var config = new AppConfig();
 
         if (root.TryGetValue("monitor", out var m) && m is TomlTable monitor)
-            config.Monitor = MonitorConfig.FromToml(monitor);
+            config = config with { Monitor = MonitorConfig.FromToml(monitor) };
 
         if (root.TryGetValue("reporting", out var r) && r is TomlTable reporting)
-            config.Reporting = ReportingConfig.FromToml(reporting);
+            config = config with { Reporting = ReportingConfig.FromToml(reporting) };
 
         if (root.TryGetValue("lan", out var l) && l is TomlTable lan)
-            config.Lan = LanConfig.FromToml(lan);
+            config = config with { Lan = LanConfig.FromToml(lan) };
 
         if (root.TryGetValue("binding", out var b) && b is TomlTable binding)
-            config.Binding = BindingConfig.FromToml(binding);
+            config = config with { Binding = BindingConfig.FromToml(binding) };
 
         if (root.TryGetValue("logging", out var log) && log is TomlTable logging)
-            config.Logging = LoggingConfig.FromToml(logging);
+            config = config with { Logging = LoggingConfig.FromToml(logging) };
 
         return config;
     }
 }
 
-public sealed class MonitorConfig
+public sealed record MonitorConfig
 {
     public string Type { get; init; } = "tmux";
     public string SessionPattern { get; init; } = "*";
@@ -83,7 +83,7 @@ public sealed class MonitorConfig
     }
 }
 
-public sealed class ReportingConfig
+public sealed record ReportingConfig
 {
     public string ApiBaseUrl { get; init; } = "https://api.agentshell.dev/v1";
     public int ReportIntervalMs { get; init; } = 1000;
@@ -97,7 +97,7 @@ public sealed class ReportingConfig
     }
 }
 
-public sealed class LanConfig
+public sealed record LanConfig
 {
     public bool Enabled { get; init; } = true;
     public int Port { get; init; } = 11920;
@@ -113,7 +113,7 @@ public sealed class LanConfig
     }
 }
 
-public sealed class BindingConfig
+public sealed record BindingConfig
 {
     public string KeyPath { get; init; } = "~/.agentshell/agent.key";
     public int CodeTtlSeconds { get; init; } = 300;
@@ -127,7 +127,7 @@ public sealed class BindingConfig
     }
 }
 
-public sealed class LoggingConfig
+public sealed record LoggingConfig
 {
     public string Level { get; init; } = "Information";
     public string FilePath { get; init; } = "";

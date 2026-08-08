@@ -103,7 +103,17 @@ public sealed class TmuxMonitor : IMonitorTarget
             if (string.IsNullOrEmpty(safe))
                 return;
 
-            // 对按键序列进行 tmux 安全转义
+            // 按键白名单验证 + tmux 安全转义
+            // 合法按键仅限审批操作字符: yYnNdDrR + Enter + Ctrl-C
+            var allowed = new System.Text.RegularExpressions.Regex(
+                @"^[yYnNdDrR\n;]+$",
+                System.Text.RegularExpressions.RegexOptions.None,
+                TimeSpan.FromMilliseconds(50));
+            if (!allowed.IsMatch(keys))
+            {
+                _logger.LogWarning("按键序列包含非法字符，拒绝发送: {Keys}", keys);
+                return;
+            }
             var escaped = keys
                 .Replace(";", "\\;")
                 .Replace("\n", "Enter");
