@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.RegularExpressions;
 using AgentShell.Daemon.Configuration;
 using Microsoft.Extensions.Logging;
 
@@ -16,6 +17,18 @@ public sealed class TmuxMonitor : IMonitorTarget
     public string Type => "tmux";
     public bool IsHealthy { get; private set; } = true;
 
+    // tmux 会话名允许的字符集：字母、数字、点、下划线、短横线
+    private static readonly Regex ValidSessionPattern =
+        new(@"^[a-zA-Z0-9._\-]+$",
+            RegexOptions.Compiled | RegexOptions.CultureInvariant,
+            TimeSpan.FromMilliseconds(100));
+
+    // 按键白名单（审批操作字符: yYnNdDrR + Enter + Ctrl-C）
+    private static readonly Regex AllowedKeysPattern =
+        new(@"^[yYnNdDrR\n\x03;]+$",
+            RegexOptions.None,
+            TimeSpan.FromMilliseconds(50));
+
     public TmuxMonitor(ILogger<TmuxMonitor> logger, AppConfig config)
     {
         _logger = logger;
@@ -30,6 +43,7 @@ public sealed class TmuxMonitor : IMonitorTarget
             var result = await RunTmuxAsync("list-sessions -F '#{session_name}'", ct);
             if (result.ExitCode != 0) return [];
 
+            IsHealthy = true;
             return result.Stdout
                 .Split('\n', StringSplitOptions.RemoveEmptyEntries)
                 .Select(s => s.Trim())
@@ -43,15 +57,8 @@ public sealed class TmuxMonitor : IMonitorTarget
         }
     }
 
-    // tmux 会话名允许的字符集：字母、数字、点、下划线、短横线
-    private static readonly System.Text.RegularExpressions.Regex ValidSessionPattern =
-        new(@"^[a-zA-Z0-9._\-]+$",
-            System.Text.RegularExpressions.RegexOptions.Compiled,
-            TimeSpan.FromMilliseconds(100));
-
     /// <summary>
     /// 验证并净化会话名，防止命令注入。
-    /// 如果会话名包含非法字符，返回空字符串并记日志。
     /// </summary>
     private string SanitizeSessionName(string sessionName)
     {
@@ -103,17 +110,12 @@ public sealed class TmuxMonitor : IMonitorTarget
             if (string.IsNullOrEmpty(safe))
                 return;
 
-            // 按键白名单验证 + tmux 安全转义
-            // 合法按键仅限审批操作字符: yYnNdDrR + Enter + Ctrl-C
-            var allowed = new System.Text.RegularExpressions.Regex(
-                @"^[yYnNdDrR\n;]+$",
-                System.Text.RegularExpressions.RegexOptions.None,
-                TimeSpan.FromMilliseconds(50));
-            if (!allowed.IsMatch(keys))
+            if (!AllowedKeysPattern.IsMatch(keys))
             {
                 _logger.LogWarning("按键序列包含非法字符，拒绝发送: {Keys}", keys);
                 return;
             }
+
             var escaped = keys
                 .Replace(";", "\\;")
                 .Replace("\n", "Enter");
@@ -134,6 +136,7 @@ public sealed class TmuxMonitor : IMonitorTarget
 
     /// <summary>
     /// 执行 tmux 命令并返回 stdout/stderr。
+    /// stdout 和 stderr 并发读取，防止管道缓冲区填满导致死锁。
     /// </summary>
     private async Task<(int ExitCode, string Stdout, string Stderr)> RunTmuxAsync(
         string arguments, CancellationToken ct)
@@ -152,10 +155,13 @@ public sealed class TmuxMonitor : IMonitorTarget
         };
 
         process.Start();
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
+
+        // 并发读取 stdout 和 stderr，防止管道缓冲区死锁
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
+        await Task.WhenAll(stdoutTask, stderrTask);
         await process.WaitForExitAsync(ct);
 
-        return (process.ExitCode, stdout, stderr);
+        return (process.ExitCode, stdoutTask.Result, stderrTask.Result);
     }
 }

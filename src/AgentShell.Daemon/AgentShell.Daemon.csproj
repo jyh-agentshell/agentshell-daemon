@@ -21,11 +21,14 @@
     <RepositoryType>git</RepositoryType>
 
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisMode>Recommended</AnalysisMode>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- AgentShell 协议模型（NuGet 引用） -->
-    <!-- 实际发布时取消注释，本地开发用项目引用 -->
+    <!-- TODO(deferred-nuget-switch): protocol NuGet 包发布后切为 PackageReference -->
     <!-- <PackageReference Include="AgentShell.Protocol" Version="0.2.0" /> -->
     <ProjectReference Include="..\..\..\agentshell-protocol\src\AgentShell.Protocol\AgentShell.Protocol.csproj" />
   </ItemGroup>

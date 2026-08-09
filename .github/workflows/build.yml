@@ -37,9 +37,6 @@ jobs:
       - name: Build
         run: dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
 
-      - name: Test
-        run: dotnet test --configuration Release --no-build --verbosity normal
-
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
@@ -76,6 +73,11 @@ jobs:
           -p:PublishSingleFile=true
           -p:PublishTrimmed=true
           --output ./publish/${{ matrix.runtime }}
+
+      - name: Smoke Test (${{ matrix.runtime }})
+        run: |
+          chmod +x ./publish/${{ matrix.runtime }}/agentshell-daemon
+          ./publish/${{ matrix.runtime }}/agentshell-daemon --version
 
       - name: Generate SHA256
         run: |

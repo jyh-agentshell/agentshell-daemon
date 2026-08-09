@@ -31,17 +31,49 @@ public sealed record AppConfig
         if (!File.Exists(path))
             return new AppConfig();
 
+        // 展开路径中的 ~
+        if (path.StartsWith("~"))
+            path = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                path.TrimStart('~', '/', '\\'));
+
         try
         {
             var toml = File.ReadAllText(path);
             var table = Toml.ToModel(toml);
-            return FromToml(table);
+            var config = FromToml(table);
+            config.Validate();
+            return config;
         }
-        catch (Exception)
+        catch (TomlException ex)
         {
-            // 配置解析失败 → 静默使用默认配置（守护进程绝不能崩）
+            // TOML 语法错误 → 输出告警，回退默认配置
+            Console.Error.WriteLine($"[WARN] 配置文件解析失败: {ex.Message}。使用默认配置。");
             return new AppConfig();
         }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"[WARN] 加载配置文件失败: {ex.Message}。使用默认配置。");
+            return new AppConfig();
+        }
+    }
+
+    /// <summary>
+    /// 验证配置值的合法性。
+    /// </summary>
+    public void Validate()
+    {
+        if (Monitor.PollIntervalMs <= 0)
+            throw new InvalidOperationException("monitor.poll_interval_ms 必须 > 0");
+
+        if (Reporting.ReportIntervalMs <= 0)
+            throw new InvalidOperationException("reporting.report_interval_ms 必须 > 0");
+
+        if (Lan.Port is < 1 or > 65535)
+            throw new InvalidOperationException("lan.port 必须在 1-65535 范围内");
+
+        if (Binding.CodeTtlSeconds <= 0)
+            throw new InvalidOperationException("binding.code_ttl_seconds 必须 > 0");
     }
 
     private static AppConfig FromToml(TomlTable root)
@@ -106,7 +138,15 @@ public sealed record LanConfig
     internal static LanConfig FromToml(TomlTable t)
     {
         var c = new LanConfig();
-        if (t.TryGetValue("enabled", out var v)) c = c with { Enabled = v?.ToString()?.ToLower() != "false" };
+        if (t.TryGetValue("enabled", out var v))
+        {
+            c = v switch
+            {
+                bool b => c with { Enabled = b },
+                string s => c with { Enabled = !s.Equals("false", StringComparison.OrdinalIgnoreCase) },
+                _ => c
+            };
+        }
         if (t.TryGetValue("port", out var p) && p is long lp) c = c with { Port = (int)lp };
         if (t.TryGetValue("bind_ip", out var bip)) c = c with { BindIp = bip?.ToString() ?? "" };
         return c;

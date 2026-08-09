@@ -72,7 +72,7 @@ dotnet publish src/AgentShell.Daemon/ \
 ## 技术栈
 
 - .NET 10 Console + `IHostedService`
-- 引用 `AgentShell.Protocol` NuGet 包（共享模型）
+- 引用 `AgentShell.Protocol` 协议库（当前本地 ProjectReference，协议包发布后切 NuGet）
 - `Microsoft.Extensions.Logging` 结构化日志
 
 ## 许可

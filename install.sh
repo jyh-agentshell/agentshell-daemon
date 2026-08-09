@@ -12,7 +12,6 @@ set -euo pipefail
 # ─── 配置 ───────────────────────────────────────────────
 REPO="jyh-agentshell/agentshell-daemon"
 INSTALL_DIR="/usr/local/bin"
-CONFIG_DIR="${HOME}/.agentshell"
 BINARY_NAME="agentshell-daemon"
 SERVICE_NAME="agentshell-daemon"
 
@@ -31,6 +30,16 @@ if [ "$(id -u)" -ne 0 ]; then
     log_error "请使用 sudo 运行此脚本"
     exit 1
 fi
+
+# 获取实际用户的 HOME 目录（sudo 下 ${HOME} 是 /root）
+REAL_USER="${SUDO_USER:-$(who am i | awk '{print $1}')}"
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+    REAL_HOME="$(eval echo ~"$REAL_USER")"
+else
+    REAL_HOME="$HOME"
+fi
+CONFIG_DIR="${REAL_HOME}/.agentshell"
+log_info "实际用户: ${REAL_USER:-root}, 配置目录: ${CONFIG_DIR}"
 
 # ─── 平台检测 ──────────────────────────────────────────
 OS="$(uname -s)"
@@ -115,11 +124,18 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=${SUDO_USER:-root}
+User=${REAL_USER:-root}
 ExecStart=${INSTALL_DIR}/${BINARY_NAME}
 Restart=always
 RestartSec=5
 Environment=DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+
+# 安全加固
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+ReadWritePaths=${REAL_HOME}/.agentshell
 
 [Install]
 WantedBy=multi-user.target

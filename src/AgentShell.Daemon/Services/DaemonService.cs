@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text;
+using System.Text.RegularExpressions;
 using AgentShell.Daemon.Configuration;
 using AgentShell.Daemon.Monitors;
 using AgentShell.Daemon.Reporting;
@@ -12,6 +13,7 @@ namespace AgentShell.Daemon.Services;
 /// <summary>
 /// 守护进程核心服务。
 /// 实现 IHostedService，在后台持续轮询 Agent 状态并上报。
+/// 监控与上报合并在单个循环中，消除并发读写竞态。
 /// </summary>
 public sealed class DaemonService : BackgroundService
 {
@@ -21,13 +23,17 @@ public sealed class DaemonService : BackgroundService
     private readonly ILogger<DaemonService> _logger;
     private readonly string _daemonVersion;
 
-    // 状态检测相关
+    // 当前追踪的会话状态
     private string? _currentSessionId;
     private AgentState _currentAgentState = AgentState.Idle;
+    private AgentState? _previousAgentState;
     private AgentType _currentAgentType = AgentType.None;
     private StateSource _currentSource = StateSource.OscMarker;
 
-    // CLI 工具进程名/提示符映射
+    // 已知会话集合（用于生命周期检测）
+    private readonly HashSet<string> _knownSessions = new(StringComparer.Ordinal);
+
+    // CLI 工具进程名映射
     private static readonly Dictionary<string, AgentType> AgentProcessMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["codex"] = AgentType.Codex,
@@ -37,9 +43,19 @@ public sealed class DaemonService : BackgroundService
     };
 
     // 正则模式（回退路径：匹配常见 CLI 审批提示）
-    private static readonly System.Text.RegularExpressions.Regex ApprovalPattern = new(
-        @"(approve|accept|confirm|proceed)\??\s*(changes|edit|modification|diff)?\s*[\[\(]?\s*[yYnN]\s*[/,]\s*[nNdDrR]",
-        System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled,
+    // 支持: Codex "(y/n/d/r)", Claude Code "(y)es/(n)o", 通用 "[y/N]", "Approve? (y/n)"
+    private static readonly Regex ApprovalPattern = new(
+        @"(?:approve|accept|confirm|proceed)\??\s*(?:changes|edit|modification|diff)?\s*[\[\(]?\s*[yYy]\s*[/,]\s*[nNdDrR]|"
+        + @"[\[\(]\s*[yY]\s*[/,]\s*[nN]\s*[\]\)]|"
+        + @"\(y\)es\s*/\s*\(n\)o|"
+        + @"\(y\)\s*/\s*\(n\)",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant,
+        TimeSpan.FromMilliseconds(100));
+
+    // 错误检测正则
+    private static readonly Regex ErrorPattern = new(
+        @"\b(?:error|ERROR|failed|FAILED|exception|traceback)\b",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant,
         TimeSpan.FromMilliseconds(100));
 
     public DaemonService(
@@ -52,78 +68,176 @@ public sealed class DaemonService : BackgroundService
         _reporter = reporter;
         _config = config;
         _logger = logger;
-        _daemonVersion = GetType().Assembly.GetName().Version?.ToString() ?? "0.1.0";
+        _daemonVersion = GetType().Assembly.GetName().Version?.ToString() ?? "0.2.0";
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        _logger.LogInformation("AgentShell daemon v{Version} 已启动。监控类型: {Type}",
-            _daemonVersion, _monitor.Type);
+        _logger.LogInformation("AgentShell daemon v{Version} 已启动。监控类型: {Type}, 会话模式: {Pattern}",
+            _daemonVersion, _monitor.Type, _config.Monitor.SessionPattern);
 
-        await Task.WhenAll(
-            MonitorLoopAsync(stoppingToken),
-            ReportLoopAsync(stoppingToken)
-        );
-    }
-
-    /// <summary>
-    /// 监控循环：轮询 tmux 会话状态
-    /// </summary>
-    private async Task MonitorLoopAsync(CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
+        // 单一循环：监控 + 状态变化时上报
+        while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await TickAsync(ct);
+                await TickAsync(stoppingToken);
             }
             catch (Exception ex)
             {
-                // 任何异常静默处理，守护进程不崩
                 _logger.LogWarning(ex, "监控轮询异常");
             }
 
-            await Task.Delay(_config.Monitor.PollIntervalMs, ct);
+            await Task.Delay(_config.Monitor.PollIntervalMs, stoppingToken);
         }
     }
 
     /// <summary>
-    /// 单次监控轮询
+    /// 单次监控轮询：检测状态 → 仅在变化时上报。
     /// </summary>
     private async Task TickAsync(CancellationToken ct)
     {
         var sessions = await _monitor.GetSessionsAsync(ct);
-        if (sessions.Count == 0) return;
 
-        // 取第一个匹配的会话
-        var sessionName = sessions[0];
+        // 会话生命周期检测
+        await DetectSessionLifecycleAsync(sessions, ct);
+
+        // 过滤匹配 glob 的会话
+        var matchingSessions = FilterSessions(sessions);
+        if (matchingSessions.Count == 0) return;
+
+        // 取第一个匹配的会话（多会话时按字母序取第一个，避免依赖 tmux list-sessions 顺序）
+        var sessionName = matchingSessions.OrderBy(s => s).First();
         var sessionId = $"{Environment.MachineName}/{_monitor.Type}/{sessionName}";
 
         // 捕获屏幕内容
         var screenContent = await _monitor.CapturePaneAsync(sessionName, ct);
         if (string.IsNullOrEmpty(screenContent)) return;
 
-        // 双路径检测
+        // 双路径检测（OSC 优先，正则回退）
         var (newState, detail, source) = DetectState(screenContent);
 
-        // 状态变更时更新追踪
-        if (sessionId != _currentSessionId || newState != _currentAgentState)
+        // 自动探测 Agent 类型
+        if (newState != AgentState.Idle && _currentAgentType == AgentType.None)
         {
-            _logger.LogInformation("状态变更: {SessionId} → {State}（来源: {Source}）",
-                sessionId, newState, source);
+            _currentAgentType = DetectAgentType(screenContent);
+            if (_currentAgentType != AgentType.None)
+                _logger.LogInformation("检测到 Agent: {AgentType}", _currentAgentType);
+        }
 
+        // 仅在状态变化时上报事件
+        bool sessionChanged = sessionId != _currentSessionId;
+        bool stateChanged = newState != _currentAgentState;
+
+        if (sessionChanged || stateChanged)
+        {
+            _logger.LogInformation("状态变更: {SessionId} {PreviousState}→{State}（来源: {Source}）",
+                sessionId, _currentAgentState, newState, source);
+
+            _previousAgentState = _currentAgentState;
             _currentSessionId = sessionId;
             _currentAgentState = newState;
             _currentSource = source;
 
-            // 自动探测 Agent 类型
-            if (newState != AgentState.Idle && _currentAgentType == AgentType.None)
+            // 上报状态变化事件
+            var evt = new AgentStateEvent
             {
-                _currentAgentType = DetectAgentType(screenContent);
-                if (_currentAgentType != AgentType.None)
-                    _logger.LogInformation("检测到 Agent: {AgentType}", _currentAgentType);
+                EventId = Guid.NewGuid().ToString(),
+                Timestamp = DateTimeOffset.UtcNow,
+                SessionId = sessionId,
+                AgentType = _currentAgentType,
+                State = newState,
+                PreviousState = _previousAgentState,
+                Detail = detail,
+                Source = source,
+                ProtocolVersion = "0.2.0",
+                DaemonVersion = _daemonVersion
+            };
+
+            await _reporter.ReportAgentStateAsync(evt, ct);
+        }
+    }
+
+    /// <summary>
+    /// 检测会话生命周期变化（新增、销毁）。
+    /// </summary>
+    private async Task DetectSessionLifecycleAsync(IReadOnlyList<string> currentSessions, CancellationToken ct)
+    {
+        var currentSet = new HashSet<string>(currentSessions, StringComparer.Ordinal);
+
+        // 新增会话
+        foreach (var session in currentSet)
+        {
+            if (!_knownSessions.Contains(session))
+            {
+                _knownSessions.Add(session);
+                _logger.LogInformation("会话创建: {Session}", session);
+
+                var lifecycleEvt = new SessionLifecycleEvent
+                {
+                    EventId = Guid.NewGuid().ToString(),
+                    Timestamp = DateTimeOffset.UtcNow,
+                    SessionId = $"{Environment.MachineName}/{_monitor.Type}/{session}",
+                    EventType = SessionEventType.Created,
+                    MultiplexerType = MapMultiplexerType(_monitor.Type),
+                    SessionName = session,
+                    AgentType = AgentType.None,
+                    ProtocolVersion = "0.2.0",
+                    DaemonVersion = _daemonVersion
+                };
+                await _reporter.ReportSessionLifecycleAsync(lifecycleEvt, ct);
             }
         }
+
+        // 销毁的会话
+        var destroyed = _knownSessions.Where(s => !currentSet.Contains(s)).ToList();
+        foreach (var session in destroyed)
+        {
+            _knownSessions.Remove(session);
+            _logger.LogInformation("会话销毁: {Session}", session);
+
+            var lifecycleEvt = new SessionLifecycleEvent
+            {
+                EventId = Guid.NewGuid().ToString(),
+                Timestamp = DateTimeOffset.UtcNow,
+                SessionId = $"{Environment.MachineName}/{_monitor.Type}/{session}",
+                EventType = SessionEventType.Destroyed,
+                MultiplexerType = MapMultiplexerType(_monitor.Type),
+                SessionName = session,
+                AgentType = AgentType.None,
+                ProtocolVersion = "0.2.0",
+                DaemonVersion = _daemonVersion
+            };
+            await _reporter.ReportSessionLifecycleAsync(lifecycleEvt, ct);
+        }
+
+        // 清理已销毁的会话追踪状态
+        if (_currentSessionId != null)
+        {
+            var currentSessionName = _currentSessionId.Split('/').LastOrDefault();
+            if (currentSessionName != null && !currentSet.Contains(currentSessionName))
+            {
+                _currentSessionId = null;
+                _currentAgentState = AgentState.Idle;
+                _currentAgentType = AgentType.None;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 根据 glob 模式过滤会话列表。
+    /// </summary>
+    private List<string> FilterSessions(IReadOnlyList<string> sessions)
+    {
+        var pattern = _config.Monitor.SessionPattern;
+        if (string.IsNullOrEmpty(pattern) || pattern == "*")
+            return [..sessions];
+
+        // 简单的 glob: * 匹配任意字符
+        var regexPattern = "^" + Regex.Escape(pattern).Replace("\\*", ".*") + "$";
+        var regex = new Regex(regexPattern, RegexOptions.CultureInvariant);
+
+        return sessions.Where(s => regex.IsMatch(s)).ToList();
     }
 
     /// <summary>
@@ -131,7 +245,7 @@ public sealed class DaemonService : BackgroundService
     /// </summary>
     private (AgentState NewState, AgentStateDetail? Detail, StateSource Source) DetectState(string content)
     {
-        // 路径 A：ANSI OSC 结构化标记
+        // 路径 A：ANSI OSC 结构化标记（取最后一条匹配，因为终端中最新的在底部）
         var oscResult = TryParseOscMarker(content);
         if (oscResult.HasValue)
         {
@@ -145,8 +259,7 @@ public sealed class DaemonService : BackgroundService
         }
 
         // 路径 B：正则回退
-        var match = ApprovalPattern.Match(content);
-        if (match.Success)
+        if (ApprovalPattern.IsMatch(content))
         {
             _logger.LogTrace("状态检测: 正则回退 → AwaitingApproval");
             return (AgentState.AwaitingApproval, new AgentStateDetail
@@ -155,16 +268,29 @@ public sealed class DaemonService : BackgroundService
             }, StateSource.RegexFallback);
         }
 
-        return (AgentState.Idle, null, StateSource.OscMarker);
+        if (ErrorPattern.IsMatch(content))
+        {
+            _logger.LogTrace("状态检测: 正则回退 → Error");
+            return (AgentState.Error, new AgentStateDetail
+            {
+                Message = "检测到错误输出"
+            }, StateSource.RegexFallback);
+        }
+
+        // 回退默认：Idle
+        return (AgentState.Idle, null, StateSource.RegexFallback);
     }
 
     /// <summary>
-    /// 尝试解析 ANSI OSC 标记: ESC ] 9 ; agent_state=<state>[; <key>=<value>]* BEL
+    /// 尝试解析 ANSI OSC 标记，格式: ESC ] 9 ; agent_state=STATE[; KEY=VALUE]* BEL。
+    /// 取最后一条匹配行（终端输出中越靠后的行越新）。
     /// </summary>
     private (AgentState state, string? message, string? prompt, int? fileCount)? TryParseOscMarker(string content)
     {
         const string prefix = "]9;";
         const string bell = "";
+
+        (AgentState state, string? message, string? prompt, int? fileCount)? lastMatch = null;
 
         foreach (var line in content.Split('\n'))
         {
@@ -199,6 +325,7 @@ public sealed class DaemonService : BackgroundService
                             "awaiting_approval" => AgentState.AwaitingApproval,
                             "idle" => AgentState.Idle,
                             "error" => AgentState.Error,
+                            "terminated" => AgentState.Terminated,
                             _ => AgentState.Running
                         };
                         break;
@@ -215,82 +342,61 @@ public sealed class DaemonService : BackgroundService
             }
 
             if (state.HasValue)
-                return (state.Value, message, prompt, fileCount);
+                lastMatch = (state.Value, message, prompt, fileCount);
         }
 
-        return null;
-    }
-
-    /// <summary>
-    /// 上报循环：定期向网关发送状态
-    /// </summary>
-    private async Task ReportLoopAsync(CancellationToken ct)
-    {
-        while (!ct.IsCancellationRequested)
-        {
-            try
-            {
-                // 有活跃会话即上报，不要求 Agent 类型已知
-                if (_currentSessionId != null)
-                {
-                    var evt = new AgentStateEvent
-                    {
-                        EventId = Guid.NewGuid().ToString(),
-                        Timestamp = DateTimeOffset.UtcNow,
-                        SessionId = _currentSessionId,
-                        AgentType = _currentAgentType,
-                        State = _currentAgentState,
-                        Source = _currentSource,
-                        DaemonVersion = _daemonVersion
-                    };
-
-                    await _reporter.ReportAgentStateAsync(evt, ct);
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "上报状态失败");
-            }
-
-            await Task.Delay(_config.Reporting.ReportIntervalMs, ct);
-        }
+        return lastMatch;
     }
 
     /// <summary>
     /// 检测终端内容中正在运行的 Agent CLI 工具类型。
-    /// 通过查找已知 CLI 的进程名或提示符特征来推断。
+    /// 优先通过 OSC 标记，其次通过已知提示符特征。
     /// </summary>
     private AgentType DetectAgentType(string content)
     {
-        // 检查终端内容中的已知 CLI 提示符特征
-        var lower = content.ToLowerInvariant();
-        foreach (var (keyword, agentType) in AgentProcessMap)
-        {
-            if (lower.Contains(keyword))
-                return agentType;
-        }
-
-        // 通过 OSC 标记中的 agent 类型字段检测
+        // 优先：OSC 标记中的 agent_type 字段（更可靠）
         foreach (var line in content.Split('\n'))
         {
-            if (line.Contains("agent_type="))
+            if (!line.Contains("agent_type=")) continue;
+
+            var idx = line.IndexOf("agent_type=", StringComparison.Ordinal);
+            if (idx < 0) continue;
+
+            var valStart = idx + "agent_type=".Length;
+            var valEnd = line.IndexOfAny([';', '\a'], valStart);
+            if (valEnd < 0) valEnd = line.Length;
+            var val = line[valStart..valEnd].Trim();
+            if (AgentProcessMap.TryGetValue(val, out var detected))
+                return detected;
+        }
+
+        // 回退：检查进程名特征（仅在包含 CLI 提示符上下文的行中检查，减少误报）
+        // 只在包含典型 CLI prompt 特征的行中查找
+        var promptLines = content.Split('\n')
+            .Where(l => l.Contains('>') || l.Contains('$') || l.Contains("❯") || l.Contains('#'))
+            .ToArray();
+
+        if (promptLines.Length > 0)
+        {
+            var promptText = string.Join("\n", promptLines).ToLowerInvariant();
+            foreach (var (keyword, agentType) in AgentProcessMap)
             {
-                var idx = line.IndexOf("agent_type=", StringComparison.Ordinal);
-                if (idx >= 0)
-                {
-                    var valStart = idx + "agent_type=".Length;
-                    var valEnd = line.IndexOf(';', valStart);
-                    if (valEnd < 0) valEnd = line.IndexOf('\a', valStart);
-                    if (valEnd < 0) valEnd = line.Length;
-                    var val = line[valStart..valEnd].Trim();
-                    if (AgentProcessMap.TryGetValue(val, out var detected))
-                        return detected;
-                }
+                if (promptText.Contains(keyword))
+                    return agentType;
             }
         }
 
         return AgentType.Unknown;
     }
+
+    private static MultiplexerType MapMultiplexerType(string type) => type switch
+    {
+        "tmux" => MultiplexerType.Tmux,
+        "screen" => MultiplexerType.Screen,
+        "zellij" => MultiplexerType.Zellij,
+        "pty" => MultiplexerType.Pty,
+        _ => MultiplexerType.Tmux
+    };
 
     private static string? DecodeBase64(string? value)
     {
