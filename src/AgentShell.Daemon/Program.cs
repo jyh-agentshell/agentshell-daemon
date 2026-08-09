@@ -93,9 +93,11 @@ public static class Program
                 return 0;
             case "bind-verify":
                 return HandleBindVerify(args);
+            case "--set-token":
+                return HandleSetToken();
             default:
                 Console.Error.WriteLine($"未知命令: {args[0]}");
-                Console.Error.WriteLine("可用命令: --generate-config | --version");
+                Console.Error.WriteLine("可用命令: --generate-config | --version | --set-token");
                 return 1;
         }
     }
@@ -192,6 +194,35 @@ file_path = ""~/.agentshell/daemon.log""");
         catch (Exception ex)
         {
             Console.Error.WriteLine($"bind-verify 失败: {ex.Message}");
+            return 1;
+        }
+    }
+
+    /// <summary>
+    /// 执行 --set-token CLI 子命令。
+    /// 从 stdin 读取一行 Access Token（App 绑定完成后通过 SSH 管道注入），
+    /// 用 TokenStore 保存到 ~/.agentshell/access_token。
+    /// </summary>
+    private static int HandleSetToken()
+    {
+        try
+        {
+            var token = Console.In.ReadToEnd().Trim();
+            if (string.IsNullOrEmpty(token))
+            {
+                Console.Error.WriteLine("错误：未提供 Token（从 stdin 读取为空）");
+                return 1;
+            }
+
+            var store = new TokenStore();
+            store.SaveAsync(token).GetAwaiter().GetResult();
+
+            Console.WriteLine("Token 已保存到 ~/.agentshell/access_token");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"保存 Token 失败: {ex.Message}");
             return 1;
         }
     }
