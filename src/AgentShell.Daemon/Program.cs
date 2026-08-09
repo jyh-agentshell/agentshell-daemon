@@ -1,6 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using AgentShell.Daemon.Auth;
 using AgentShell.Daemon.Configuration;
 using AgentShell.Daemon.Monitors;
 using AgentShell.Daemon.Reporting;
@@ -47,8 +48,21 @@ public static class Program
                     };
                 });
 
-                // 上报客户端（Phase 2 实现真实 HTTP 客户端）
-                services.AddSingleton<IApiReporter, NoOpReporter>();
+                // Token 生命周期管理（绑定完成后由外部注入首个 Token）
+                services.AddSingleton<TokenStore>();
+                services.AddSingleton<TokenManager>(sp =>
+                {
+                    var config = sp.GetRequiredService<AppConfig>();
+                    var store = sp.GetRequiredService<TokenStore>();
+                    var logger = sp.GetRequiredService<ILogger<TokenManager>>();
+                    var tm = new TokenManager(config, store, logger);
+                    // 同步阻塞初始化（守护进程启动时必须完成）
+                    tm.InitializeAsync().GetAwaiter().GetResult();
+                    return tm;
+                });
+
+                // 上报客户端（真实 HTTPS 上报，通过 TokenManager 获取 Bearer Token）
+                services.AddSingleton<IApiReporter, HttpApiReporter>();
 
                 // 守护进程核心服务
                 services.AddHostedService<DaemonService>();

@@ -1,0 +1,111 @@
+using System.Net.Http.Json;
+using AgentShell.Daemon.Auth;
+using AgentShell.Daemon.Configuration;
+using AgentShell.Protocol.Models;
+using Microsoft.Extensions.Logging;
+
+namespace AgentShell.Daemon.Reporting;
+
+/// <summary>
+/// 真实 HTTPS 上报客户端。
+/// 通过 TokenManager 获取认证 Token，向 .NET 网关上报 Agent 状态和会话生命周期事件。
+/// </summary>
+public sealed class HttpApiReporter : IApiReporter, IDisposable
+{
+    private readonly HttpClient _httpClient;
+    private readonly TokenManager _tokenManager;
+    private readonly ILogger<HttpApiReporter> _logger;
+    private readonly string _daemonVersion;
+
+    public HttpApiReporter(
+        AppConfig config,
+        TokenManager tokenManager,
+        ILogger<HttpApiReporter> logger)
+    {
+        _tokenManager = tokenManager;
+        _logger = logger;
+        _daemonVersion = GetType().Assembly.GetName().Version?.ToString() ?? "0.2.0";
+
+        _httpClient = new HttpClient
+        {
+            BaseAddress = new Uri(config.Reporting.ApiBaseUrl.TrimEnd('/') + "/"),
+            Timeout = TimeSpan.FromSeconds(10)
+        };
+        _httpClient.DefaultRequestHeaders.Add("X-Agentshell-Daemon-Version", _daemonVersion);
+    }
+
+    public async Task ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
+    {
+        var token = await _tokenManager.GetAccessTokenAsync(ct);
+        if (token == null)
+        {
+            _logger.LogWarning("无法获取 Access Token（状态: {State}），跳过上报", _tokenManager.CurrentState);
+            return;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "sessions/report")
+        {
+            Content = JsonContent.Create(stateEvent)
+        };
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        var response = await _httpClient.SendAsync(request, ct);
+        if (response.IsSuccessStatusCode)
+        {
+            _logger.LogDebug("状态上报成功: {SessionId} → {State}", stateEvent.SessionId, stateEvent.State);
+        }
+        else
+        {
+            _logger.LogWarning("状态上报失败: {StatusCode} ({SessionId})", response.StatusCode, stateEvent.SessionId);
+        }
+    }
+
+    public async Task ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default)
+    {
+        var token = await _tokenManager.GetAccessTokenAsync(ct);
+        if (token == null)
+        {
+            _logger.LogWarning("无法获取 Access Token（状态: {State}），跳过上报", _tokenManager.CurrentState);
+            return;
+        }
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "sessions/lifecycle")
+        {
+            Content = JsonContent.Create(lifecycleEvent)
+        };
+        request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        var response = await _httpClient.SendAsync(request, ct);
+        if (response.IsSuccessStatusCode)
+        {
+            _logger.LogDebug("生命周期上报成功: {SessionId}", lifecycleEvent.SessionId);
+        }
+        else
+        {
+            _logger.LogWarning("生命周期上报失败: {StatusCode} ({SessionId})", response.StatusCode, lifecycleEvent.SessionId);
+        }
+    }
+
+    public async Task<bool> PingAsync(CancellationToken ct = default)
+    {
+        var token = await _tokenManager.GetAccessTokenAsync(ct);
+        if (token == null)
+            return false;
+
+        try
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, "health");
+            var response = await _httpClient.SendAsync(request, ct);
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    public void Dispose()
+    {
+        _httpClient.Dispose();
+    }
+}
