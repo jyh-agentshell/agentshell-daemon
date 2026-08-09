@@ -22,20 +22,20 @@ public sealed record AppConfig
     public LoggingConfig Logging { get; init; } = new();
 
     /// <summary>
-    /// 从默认路径加载配置。如果文件不存在，返回默认配置。
+    /// 从默认路径加载并验证配置。配置缺失或无效时拒绝启动。
     /// </summary>
     public static AppConfig Load(string? path = null)
     {
         path ??= DefaultPath;
 
-        if (!File.Exists(path))
-            return new AppConfig();
-
         // 展开路径中的 ~
-        if (path.StartsWith("~"))
+        if (path.StartsWith('~'))
             path = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
                 path.TrimStart('~', '/', '\\'));
+
+        if (!File.Exists(path))
+            throw new FileNotFoundException("未找到守护进程配置文件。请先运行 --generate-config 生成配置。", path);
 
         try
         {
@@ -47,14 +47,15 @@ public sealed record AppConfig
         }
         catch (TomlException ex)
         {
-            // TOML 语法错误 → 输出告警，回退默认配置
-            Console.Error.WriteLine($"[WARN] 配置文件解析失败: {ex.Message}。使用默认配置。");
-            return new AppConfig();
+            throw new InvalidOperationException("配置文件 TOML 格式无效。", ex);
+        }
+        catch (InvalidOperationException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"[WARN] 加载配置文件失败: {ex.Message}。使用默认配置。");
-            return new AppConfig();
+            throw new InvalidOperationException("配置文件无效，守护进程拒绝启动。", ex);
         }
     }
 
@@ -68,6 +69,9 @@ public sealed record AppConfig
 
         if (Reporting.ReportIntervalMs <= 0)
             throw new InvalidOperationException("reporting.report_interval_ms 必须 > 0");
+
+        if (!Guid.TryParse(Reporting.HostId, out _))
+            throw new InvalidOperationException("reporting.host_id 必须是有效 UUID");
 
         if (Lan.Port is < 1 or > 65535)
             throw new InvalidOperationException("lan.port 必须在 1-65535 范围内");
@@ -117,12 +121,14 @@ public sealed record MonitorConfig
 
 public sealed record ReportingConfig
 {
+    public string HostId { get; init; } = string.Empty;
     public string ApiBaseUrl { get; init; } = "https://api.agentshell.dev/v1";
     public int ReportIntervalMs { get; init; } = 1000;
 
     internal static ReportingConfig FromToml(TomlTable t)
     {
         var c = new ReportingConfig();
+        if (t.TryGetValue("host_id", out var hostId)) c = c with { HostId = hostId?.ToString() ?? string.Empty };
         if (t.TryGetValue("api_base_url", out var v)) c = c with { ApiBaseUrl = v?.ToString() ?? c.ApiBaseUrl };
         if (t.TryGetValue("report_interval_ms", out var ri) && ri is long lri) c = c with { ReportIntervalMs = (int)lri };
         return c;

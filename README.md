@@ -10,7 +10,7 @@
 
 - **多路复用器监控**: 通过 `IMonitorTarget` 接口适配 tmux（screen/zellij/pty 预留接口）
 - **双路径状态检测**: ANSI OSC 结构化标记（优先） + 正则回退
-- **配置系统**: `agentshell.toml` + Tomlyn 解析，静默回退默认值
+- **配置系统**: `agentshell.toml` + Tomlyn 解析；缺失或无效的主机身份配置会拒绝启动
 - **零依赖部署**: `dotnet publish --self-contained` 编译为单文件二进制
 
 ### 规划中（Phase 2+）
@@ -42,6 +42,8 @@ session_pattern = "*"
 poll_interval_ms = 500
 
 [reporting]
+# 主机唯一 UUID。请使用 --generate-config 生成，勿在多台主机间复用。
+host_id = "由 --generate-config 自动生成"
 api_base_url = "https://api.agentshell.dev/v1"
 report_interval_ms = 1000
 

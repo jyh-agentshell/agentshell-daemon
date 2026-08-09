@@ -76,17 +76,18 @@ jobs:
 
       - name: Smoke Test (${{ matrix.runtime }})
         run: |
-          chmod +x ./publish/${{ matrix.runtime }}/agentshell-daemon
-          ./publish/${{ matrix.runtime }}/agentshell-daemon --version
+          mv ./publish/${{ matrix.runtime }}/agentshell-daemon ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }}
+          chmod +x ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }}
+          ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }} --version
 
       - name: Generate SHA256
         run: |
           cd ./publish/${{ matrix.runtime }}
-          sha256sum agentshell-daemon > agentshell-daemon-${{ matrix.suffix }}.sha256
+          sha256sum agentshell-daemon-${{ matrix.suffix }} > agentshell-daemon-${{ matrix.suffix }}.sha256
 
       - name: Upload to Release
         uses: softprops/action-gh-release@v2.2.1
         with:
           files: |
-            ./publish/${{ matrix.runtime }}/agentshell-daemon
+            ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }}
             ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }}.sha256

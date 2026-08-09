@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text;
 using System.Text.RegularExpressions;
 using AgentShell.Daemon.Configuration;
 using AgentShell.Daemon.Monitors;
@@ -23,12 +22,8 @@ public sealed class DaemonService : BackgroundService
     private readonly ILogger<DaemonService> _logger;
     private readonly string _daemonVersion;
 
-    // 当前追踪的会话状态
-    private string? _currentSessionId;
-    private AgentState _currentAgentState = AgentState.Idle;
-    private AgentState? _previousAgentState;
-    private AgentType _currentAgentType = AgentType.None;
-    private StateSource _currentSource = StateSource.OscMarker;
+    // 每个会话独立追踪状态，避免多个会话相互覆盖。
+    private readonly Dictionary<string, SessionState> _sessionStates = new(StringComparer.Ordinal);
 
     // 已知会话集合（用于生命周期检测）
     private readonly HashSet<string> _knownSessions = new(StringComparer.Ordinal);
@@ -106,55 +101,58 @@ public sealed class DaemonService : BackgroundService
         var matchingSessions = FilterSessions(sessions);
         if (matchingSessions.Count == 0) return;
 
-        // 取第一个匹配的会话（多会话时按字母序取第一个，避免依赖 tmux list-sessions 顺序）
-        var sessionName = matchingSessions.OrderBy(s => s).First();
-        var sessionId = $"{Environment.MachineName}/{_monitor.Type}/{sessionName}";
-
-        // 捕获屏幕内容
-        var screenContent = await _monitor.CapturePaneAsync(sessionName, ct);
-        if (string.IsNullOrEmpty(screenContent)) return;
-
-        // 双路径检测（OSC 优先，正则回退）
-        var (newState, detail, source) = DetectState(screenContent);
-
-        // 自动探测 Agent 类型
-        if (newState != AgentState.Idle && _currentAgentType == AgentType.None)
+        foreach (var sessionName in matchingSessions.OrderBy(s => s, StringComparer.Ordinal))
         {
-            _currentAgentType = DetectAgentType(screenContent);
-            if (_currentAgentType != AgentType.None)
-                _logger.LogInformation("检测到 Agent: {AgentType}", _currentAgentType);
-        }
-
-        // 仅在状态变化时上报事件
-        bool sessionChanged = sessionId != _currentSessionId;
-        bool stateChanged = newState != _currentAgentState;
-
-        if (sessionChanged || stateChanged)
-        {
-            _logger.LogInformation("状态变更: {SessionId} {PreviousState}→{State}（来源: {Source}）",
-                sessionId, _currentAgentState, newState, source);
-
-            _previousAgentState = _currentAgentState;
-            _currentSessionId = sessionId;
-            _currentAgentState = newState;
-            _currentSource = source;
-
-            // 上报状态变化事件
-            var evt = new AgentStateEvent
+            try
             {
-                EventId = Guid.NewGuid().ToString(),
-                Timestamp = DateTimeOffset.UtcNow,
-                SessionId = sessionId,
-                AgentType = _currentAgentType,
-                State = newState,
-                PreviousState = _previousAgentState,
-                Detail = detail,
-                Source = source,
-                ProtocolVersion = "0.2.0",
-                DaemonVersion = _daemonVersion
-            };
+                var sessionId = BuildSessionId(sessionName);
+                var screenContent = await _monitor.CapturePaneAsync(sessionName, ct);
+                if (string.IsNullOrEmpty(screenContent))
+                    continue;
 
-            await _reporter.ReportAgentStateAsync(evt, ct);
+                var (newState, detail, source) = DetectState(screenContent);
+                var wasTracked = _sessionStates.TryGetValue(sessionName, out var previous);
+                var agentType = previous?.AgentType ?? AgentType.None;
+
+                if (newState != AgentState.Idle && agentType == AgentType.None)
+                {
+                    agentType = DetectAgentType(screenContent);
+                    if (agentType != AgentType.None)
+                        _logger.LogInformation("会话 {Session} 检测到 Agent: {AgentType}", sessionName, agentType);
+                }
+
+                if (wasTracked && newState == previous!.State)
+                    continue;
+
+                var previousState = wasTracked ? previous!.State : AgentState.Idle;
+                _logger.LogInformation("状态变更: {SessionId} {PreviousState}→{State}（来源: {Source}）",
+                    sessionId, previousState, newState, source);
+
+                var evt = new AgentStateEvent
+                {
+                    EventId = Guid.NewGuid().ToString(),
+                    Timestamp = DateTimeOffset.UtcNow,
+                    SessionId = sessionId,
+                    AgentType = agentType,
+                    State = newState,
+                    PreviousState = previousState,
+                    Detail = detail,
+                    Source = source,
+                    ProtocolVersion = "0.2.0",
+                    DaemonVersion = _daemonVersion
+                };
+
+                await _reporter.ReportAgentStateAsync(evt, ct);
+                _sessionStates[sessionName] = new SessionState(newState, agentType);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "会话 {Session} 的状态检测或上报失败，将在下次轮询重试", sessionName);
+            }
         }
     }
 
@@ -177,7 +175,7 @@ public sealed class DaemonService : BackgroundService
                 {
                     EventId = Guid.NewGuid().ToString(),
                     Timestamp = DateTimeOffset.UtcNow,
-                    SessionId = $"{Environment.MachineName}/{_monitor.Type}/{session}",
+                SessionId = BuildSessionId(session),
                     EventType = SessionEventType.Created,
                     MultiplexerType = MapMultiplexerType(_monitor.Type),
                     SessionName = session,
@@ -200,7 +198,7 @@ public sealed class DaemonService : BackgroundService
             {
                 EventId = Guid.NewGuid().ToString(),
                 Timestamp = DateTimeOffset.UtcNow,
-                SessionId = $"{Environment.MachineName}/{_monitor.Type}/{session}",
+                    SessionId = BuildSessionId(session),
                 EventType = SessionEventType.Destroyed,
                 MultiplexerType = MapMultiplexerType(_monitor.Type),
                 SessionName = session,
@@ -211,17 +209,8 @@ public sealed class DaemonService : BackgroundService
             await _reporter.ReportSessionLifecycleAsync(lifecycleEvt, ct);
         }
 
-        // 清理已销毁的会话追踪状态
-        if (_currentSessionId != null)
-        {
-            var currentSessionName = _currentSessionId.Split('/').LastOrDefault();
-            if (currentSessionName != null && !currentSet.Contains(currentSessionName))
-            {
-                _currentSessionId = null;
-                _currentAgentState = AgentState.Idle;
-                _currentAgentType = AgentType.None;
-            }
-        }
+        foreach (var session in _sessionStates.Keys.Where(s => !currentSet.Contains(s)).ToArray())
+            _sessionStates.Remove(session);
     }
 
     /// <summary>
@@ -250,31 +239,22 @@ public sealed class DaemonService : BackgroundService
         if (oscResult.HasValue)
         {
             _logger.LogTrace("状态检测: OSC 标记 → {State}", oscResult.Value.state);
-            return (oscResult.Value.state, new AgentStateDetail
-            {
-                Message = oscResult.Value.message,
-                Prompt = oscResult.Value.prompt,
-                FileCount = oscResult.Value.fileCount
-            }, StateSource.OscMarker);
+            return (oscResult.Value.state, oscResult.Value.fileCount.HasValue
+                ? new AgentStateDetail { FileCount = oscResult.Value.fileCount }
+                : null, StateSource.OscMarker);
         }
 
         // 路径 B：正则回退
         if (ApprovalPattern.IsMatch(content))
         {
             _logger.LogTrace("状态检测: 正则回退 → AwaitingApproval");
-            return (AgentState.AwaitingApproval, new AgentStateDetail
-            {
-                Message = "检测到审批提示"
-            }, StateSource.RegexFallback);
+            return (AgentState.AwaitingApproval, null, StateSource.RegexFallback);
         }
 
         if (ErrorPattern.IsMatch(content))
         {
             _logger.LogTrace("状态检测: 正则回退 → Error");
-            return (AgentState.Error, new AgentStateDetail
-            {
-                Message = "检测到错误输出"
-            }, StateSource.RegexFallback);
+            return (AgentState.Error, null, StateSource.RegexFallback);
         }
 
         // 回退默认：Idle
@@ -285,36 +265,36 @@ public sealed class DaemonService : BackgroundService
     /// 尝试解析 ANSI OSC 标记，格式: ESC ] 9 ; agent_state=STATE[; KEY=VALUE]* BEL。
     /// 取最后一条匹配行（终端输出中越靠后的行越新）。
     /// </summary>
-    private (AgentState state, string? message, string? prompt, int? fileCount)? TryParseOscMarker(string content)
+    private (AgentState state, int? fileCount)? TryParseOscMarker(string content)
     {
         const string prefix = "]9;";
         const string bell = "";
 
-        (AgentState state, string? message, string? prompt, int? fileCount)? lastMatch = null;
+        (AgentState state, int? fileCount)? lastMatch = null;
 
         foreach (var line in content.Split('\n'))
         {
             var idx = line.IndexOf(prefix, StringComparison.Ordinal);
             if (idx < 0) continue;
 
-            var endIdx = line.IndexOf(bell, idx + prefix.Length);
+            var endIdx = line.IndexOf(bell, idx + prefix.Length, StringComparison.Ordinal);
             if (endIdx < 0) continue;
 
             var body = line[(idx + prefix.Length)..endIdx].Trim();
             var parts = body.Split(';', StringSplitOptions.RemoveEmptyEntries);
 
             AgentState? state = null;
-            string? message = null;
-            string? prompt = null;
             int? fileCount = null;
 
             foreach (var part in parts)
             {
-                var kv = part.Split('=', 2);
-                if (kv.Length != 2) continue;
+                var separatorIndex = part.IndexOf('=');
+                if (separatorIndex <= 0) continue;
 
-                var key = kv[0].Trim();
-                var value = kv[1].Trim();
+                var key = part[..separatorIndex].Trim();
+                if (key is not "agent_state" and not "files") continue;
+
+                var value = part[(separatorIndex + 1)..].Trim();
 
                 switch (key)
                 {
@@ -329,12 +309,6 @@ public sealed class DaemonService : BackgroundService
                             _ => AgentState.Running
                         };
                         break;
-                    case "message":
-                        message = DecodeBase64(value);
-                        break;
-                    case "prompt":
-                        prompt = DecodeBase64(value);
-                        break;
                     case "files":
                         if (int.TryParse(value, out var fc)) fileCount = fc;
                         break;
@@ -342,7 +316,7 @@ public sealed class DaemonService : BackgroundService
             }
 
             if (state.HasValue)
-                lastMatch = (state.Value, message, prompt, fileCount);
+                lastMatch = (state.Value, fileCount);
         }
 
         return lastMatch;
@@ -398,16 +372,8 @@ public sealed class DaemonService : BackgroundService
         _ => MultiplexerType.Tmux
     };
 
-    private static string? DecodeBase64(string? value)
-    {
-        if (string.IsNullOrEmpty(value)) return null;
-        try
-        {
-            return Encoding.UTF8.GetString(Convert.FromBase64String(value));
-        }
-        catch
-        {
-            return value;
-        }
-    }
+    private string BuildSessionId(string sessionName) =>
+        $"{_config.Reporting.HostId}/{_monitor.Type}/{sessionName}";
+
+    private sealed record SessionState(AgentState State, AgentType AgentType);
 }

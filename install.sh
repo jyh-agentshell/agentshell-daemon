@@ -145,9 +145,6 @@ systemctl daemon-reload
 systemctl enable "${SERVICE_NAME}"
 systemctl start "${SERVICE_NAME}"
 
-# ─── 生成绑定码 ─────────────────────────────────────────
-BINDING_CODE=$("${INSTALL_DIR}/${BINARY_NAME}" --generate-binding-code 2>/dev/null || echo "N/A")
-
 log_info ""
 log_info "════════════════════════════════════════════════"
 log_info "  AgentShell 守护进程安装完成！"
@@ -155,7 +152,7 @@ log_info "═══════════════════════�
 log_info "  服务状态: systemctl status ${SERVICE_NAME}"
 log_info "  配置文件: ${CONFIG_DIR}/agentshell.toml"
 log_info "  日志:     journalctl -u ${SERVICE_NAME} -f"
-log_info "  绑定码:   ${BINDING_CODE}"
+log_warn "  设备绑定尚未实现；当前安装不会生成可用于服务端绑定的绑定码。"
 log_info "════════════════════════════════════════════════"
 
 # ─── 清理 ───────────────────────────────────────────────
