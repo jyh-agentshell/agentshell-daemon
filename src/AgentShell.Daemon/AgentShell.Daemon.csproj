@@ -38,6 +38,9 @@
     <PackageReference Include="BouncyCastle.Cryptography" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+    <!-- JWT 解析：JwtSecurityTokenHandler.ReadJwtToken 读取 Token 的过期时间和 jti。
+         需要显式引用——daemon 不像 Server 那样通过 JwtBearer 包间接引入 -->
+    <PackageReference Include="System.IdentityModel.Tokens.Jwt" />
     <PackageReference Include="Tomlyn" />
   </ItemGroup>
 
