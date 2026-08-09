@@ -34,6 +34,8 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Ed25519 签名：.NET BCL 截至 .NET 10 未公开 Ed25519 类，使用 BouncyCastle（RFC 8032 纯托管实现，支持裁剪） -->
+    <PackageReference Include="BouncyCastle.Cryptography" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" />
     <PackageReference Include="Tomlyn" />

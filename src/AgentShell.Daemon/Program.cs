@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using AgentShell.Daemon.Configuration;
 using AgentShell.Daemon.Monitors;
 using AgentShell.Daemon.Reporting;
+using AgentShell.Daemon.Security;
 using AgentShell.Daemon.Services;
 
 namespace AgentShell.Daemon;
@@ -77,7 +78,7 @@ public static class Program
                 Console.WriteLine($"agentshell-daemon v{version}");
                 return 0;
             case "bind-verify":
-                return BindingNotImplemented();
+                return HandleBindVerify(args);
             default:
                 Console.Error.WriteLine($"未知命令: {args[0]}");
                 Console.Error.WriteLine("可用命令: --generate-config | --version");
@@ -134,5 +135,48 @@ file_path = ""~/.agentshell/daemon.log""");
     {
         Console.Error.WriteLine("设备绑定尚未实现；未生成绑定码或签名。守护进程拒绝伪造服务端绑定结果。");
         return 1;
+    }
+
+    /// <summary>
+    /// 执行 bind-verify CLI 子命令。
+    /// 从 stdin 读取 "{binding_code}:{nonce}"，用 Ed25519 私钥签名，
+    /// 输出 JSON {signature, public_key} 到 stdout。
+    /// </summary>
+    private static int HandleBindVerify(string[] args)
+    {
+        try
+        {
+            // 从 stdin 读取要签名的消息
+            var input = Console.In.ReadToEnd().Trim();
+            if (string.IsNullOrEmpty(input))
+            {
+                Console.Error.WriteLine("bind-verify 需要从 stdin 读取 \"{binding_code}:{nonce}\"");
+                return 1;
+            }
+
+            // 加载或创建密钥对
+            var config = AppConfig.Load();
+            var keyPath = config.Binding.KeyPath;
+            var (privateKey, publicKey) = Ed25519KeyManager.LoadOrCreateKeyPair(keyPath);
+
+            // 签名
+            var message = System.Text.Encoding.UTF8.GetBytes(input);
+            var signature = Ed25519KeyManager.Sign(privateKey, message);
+
+            // 输出 JSON 到 stdout
+            var result = $$"""
+            {
+              "signature": "{{Convert.ToBase64String(signature)}}",
+              "public_key": "{{Convert.ToBase64String(publicKey)}}"
+            }
+            """;
+            Console.WriteLine(result);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"bind-verify 失败: {ex.Message}");
+            return 1;
+        }
     }
 }
