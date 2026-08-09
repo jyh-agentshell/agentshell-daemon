@@ -140,7 +140,8 @@ file_path = ""~/.agentshell/daemon.log""");
     /// <summary>
     /// 执行 bind-verify CLI 子命令。
     /// 从 stdin 读取 "{binding_code}:{nonce}"，用 Ed25519 私钥签名，
-    /// 输出 JSON {signature, public_key} 到 stdout。
+    /// 输出 JSON {host_id, signature, public_key} 到 stdout。
+    /// host_id 来自 agentshell.toml 的 reporting.host_id，供 App 关联主机公钥。
     /// </summary>
     private static int HandleBindVerify(string[] args)
     {
@@ -166,6 +167,7 @@ file_path = ""~/.agentshell/daemon.log""");
             // 输出 JSON 到 stdout
             var result = $$"""
             {
+              "host_id": "{{config.Reporting.HostId}}",
               "signature": "{{Convert.ToBase64String(signature)}}",
               "public_key": "{{Convert.ToBase64String(publicKey)}}"
             }
