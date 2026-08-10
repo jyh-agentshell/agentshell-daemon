@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 env:
-  DOTNET_VERSION: "10.0.302"
+  DOTNET_VERSION: "10.0.110"
   PROJECT_PATH: "src/AgentShell.Daemon/AgentShell.Daemon.csproj"
 
 jobs:
@@ -36,6 +36,9 @@ jobs:
 
       - name: Build
         run: dotnet build ${{ env.PROJECT_PATH }} --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/AgentShell.Daemon.Tests/AgentShell.Daemon.Tests.csproj --configuration Release --no-restore
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
