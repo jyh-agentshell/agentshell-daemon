@@ -150,8 +150,6 @@ public sealed class DaemonServiceTests
         public Task<string> CapturePaneAsync(string sessionName, CancellationToken ct = default) =>
             Task.FromResult(panes[sessionName]);
 
-        public Task SendKeysAsync(string sessionName, string keys, CancellationToken ct = default) => Task.CompletedTask;
-
         public void Dispose()
         {
         }
@@ -172,8 +170,6 @@ public sealed class DaemonServiceTests
 
             return Task.FromResult(panes[sessionName]);
         }
-
-        public Task SendKeysAsync(string sessionName, string keys, CancellationToken ct = default) => Task.CompletedTask;
 
         public void Dispose()
         {

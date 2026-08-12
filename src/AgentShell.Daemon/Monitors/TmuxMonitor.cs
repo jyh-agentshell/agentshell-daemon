@@ -7,7 +7,7 @@ namespace AgentShell.Daemon.Monitors;
 
 /// <summary>
 /// tmux 终端复用器的监控实现。
-/// 通过调用 tmux CLI 命令来捕获屏幕内容、发送按键和管理会话。
+/// 通过调用 tmux CLI 命令捕获屏幕内容和管理会话。
 /// </summary>
 public sealed class TmuxMonitor : IMonitorTarget
 {
@@ -22,12 +22,6 @@ public sealed class TmuxMonitor : IMonitorTarget
         new(@"^[a-zA-Z0-9._\-]+$",
             RegexOptions.Compiled | RegexOptions.CultureInvariant,
             TimeSpan.FromMilliseconds(100));
-
-    // 按键白名单（审批操作字符: yYnNdDrR + Enter + Ctrl-C）
-    private static readonly Regex AllowedKeysPattern =
-        new(@"^[yYnNdDrR\n\x03;]+$",
-            RegexOptions.None,
-            TimeSpan.FromMilliseconds(50));
 
     public TmuxMonitor(ILogger<TmuxMonitor> logger, AppConfig config)
     {
@@ -98,37 +92,6 @@ public sealed class TmuxMonitor : IMonitorTarget
             _logger.LogWarning(ex, "捕获 tmux 会话屏幕失败");
             IsHealthy = false;
             return string.Empty;
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task SendKeysAsync(string sessionName, string keys, CancellationToken ct = default)
-    {
-        try
-        {
-            var safe = SanitizeSessionName(sessionName);
-            if (string.IsNullOrEmpty(safe))
-                return;
-
-            if (!AllowedKeysPattern.IsMatch(keys))
-            {
-                _logger.LogWarning("按键序列包含非法字符，拒绝发送: {Keys}", keys);
-                return;
-            }
-
-            var escaped = keys
-                .Replace(";", "\\;")
-                .Replace("\n", "Enter");
-
-            var result = await RunTmuxAsync(
-                $"send-keys -t \"{safe}\" \"{escaped}\"",
-                ct);
-            IsHealthy = result.ExitCode == 0;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "向 tmux 会话发送按键失败");
-            IsHealthy = false;
         }
     }
 
