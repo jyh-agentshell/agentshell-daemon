@@ -182,7 +182,7 @@ file_path = ""~/.agentshell/daemon.log""");
             }
 
             var delimiter = input.IndexOf(':');
-            if (delimiter != 6 || !CreateBindingStore(AppConfig.Load()).Consume(input[..delimiter]))
+            if (delimiter != 6 || input.Length == delimiter + 1 || !CreateBindingStore(AppConfig.Load()).Consume(input[..delimiter]))
             {
                 Console.Error.WriteLine("绑定码无效、已过期或已被使用");
                 return 1;
