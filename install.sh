@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # AgentShell 守护进程一键安装脚本
-# 用法: curl -fsSL https://raw.githubusercontent.com/jyh-agentshell/agentshell-daemon/main/install.sh | bash
+# 用法见 README：先下载并人工校验脚本，再以 sudo 执行。
 #
 # 此脚本做三件事：
 # 1. 从 GitHub Releases 下载最新二进制
@@ -56,6 +56,15 @@ case "$ARCH" in
     *)       log_error "不支持的架构: $ARCH"; exit 1 ;;
 esac
 
+# install.sh 只承担首次安装；更新必须经过后续独立的安全更新器。
+if [ -e "${INSTALL_DIR}/${BINARY_NAME}" ]; then
+    log_error "检测到既有安装；install.sh 不承担更新。请等待 P6 安全更新器或先按卸载文档处理。"
+    exit 2
+fi
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf -- "$TEMP_DIR"' EXIT
+
 # ─── 获取最新版本号 ────────────────────────────────────
 log_info "正在查询最新版本..."
 VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/')
@@ -71,7 +80,6 @@ log_info "最新版本: v${VERSION}"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${BINARY_NAME}-${PLATFORM}-${ARCH}"
 CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 
-TEMP_DIR=$(mktemp -d)
 BINARY_PATH="${TEMP_DIR}/${BINARY_NAME}"
 
 log_info "下载: ${DOWNLOAD_URL}"
@@ -88,7 +96,6 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
     log_error "SHA256 校验失败！"
     log_error "  期望: $EXPECTED"
     log_error "  实际: $ACTUAL"
-    rm -rf "$TEMP_DIR"
     exit 1
 fi
 
@@ -154,6 +161,3 @@ log_info "  配置文件: ${CONFIG_DIR}/agentshell.toml"
 log_info "  日志:     journalctl -u ${SERVICE_NAME} -f"
 log_warn "  设备绑定尚未实现；当前安装不会生成可用于服务端绑定的绑定码。"
 log_info "════════════════════════════════════════════════"
-
-# ─── 清理 ───────────────────────────────────────────────
-rm -rf "$TEMP_DIR"
