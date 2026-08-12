@@ -85,7 +85,12 @@ public static class Program
                 GenerateConfig();
                 return 0;
             case "--generate-binding-code":
-                return GenerateBindingCode();
+                if (args.Length > 2)
+                {
+                    Console.Error.WriteLine("--generate-binding-code 最多接受一个 SSH 主机名参数");
+                    return 1;
+                }
+                return GenerateBindingCode(args.ElementAtOrDefault(1));
             case "--version":
             case "-v":
                 var version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "0.2.0";
@@ -149,13 +154,21 @@ level = ""Information""
 file_path = ""~/.agentshell/daemon.log""");
     }
 
-    private static int GenerateBindingCode()
+    private static int GenerateBindingCode(string? sshHostname)
     {
         try
         {
             var config = AppConfig.Load();
             var code = CreateBindingStore(config).Generate(TimeSpan.FromSeconds(config.Binding.CodeTtlSeconds));
-            Console.WriteLine(code);
+            if (string.IsNullOrWhiteSpace(sshHostname))
+            {
+                Console.WriteLine(code);
+                return 0;
+            }
+
+            if (sshHostname.Any(char.IsWhiteSpace) || sshHostname.Any(char.IsControl))
+                throw new ArgumentException("SSH 主机名不能包含空白或控制字符。");
+            Console.WriteLine($"agentshell://bind?code={code}&host={Uri.EscapeDataString(sshHostname)}");
             return 0;
         }
         catch (Exception ex)
