@@ -64,6 +64,20 @@ public sealed class DaemonServiceTests
     }
 
     [Fact]
+    public void Load_报告地址使用HTTP时安全失败()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"agentshell-{Guid.NewGuid():N}.toml");
+        File.WriteAllText(path, "[reporting]\nhost_id = \"9e01c440-8e39-4b84-9af7-67455467a837\"\napi_base_url = \"http://api.example\"\n");
+
+        try
+        {
+            var exception = Assert.Throws<InvalidOperationException>(() => AppConfig.Load(path));
+            Assert.Contains("HTTPS", exception.Message, StringComparison.Ordinal);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public async Task TickAsync_一个会话捕获失败时仍上报其后的会话()
     {
         var reporter = new RecordingReporter();
