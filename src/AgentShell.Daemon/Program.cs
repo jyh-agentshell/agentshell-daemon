@@ -85,7 +85,7 @@ public static class Program
                 GenerateConfig();
                 return 0;
             case "--generate-binding-code":
-                return BindingNotImplemented();
+                return GenerateBindingCode();
             case "--version":
             case "-v":
                 var version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "0.2.0";
@@ -147,10 +147,20 @@ level = ""Information""
 file_path = ""~/.agentshell/daemon.log""");
     }
 
-    private static int BindingNotImplemented()
+    private static int GenerateBindingCode()
     {
-        Console.Error.WriteLine("设备绑定尚未实现；未生成绑定码或签名。守护进程拒绝伪造服务端绑定结果。");
-        return 1;
+        try
+        {
+            var config = AppConfig.Load();
+            var code = CreateBindingStore(config).Generate(TimeSpan.FromSeconds(config.Binding.CodeTtlSeconds));
+            Console.WriteLine(code);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"生成绑定码失败: {ex.Message}");
+            return 1;
+        }
     }
 
     /// <summary>
@@ -168,6 +178,13 @@ file_path = ""~/.agentshell/daemon.log""");
             if (string.IsNullOrEmpty(input))
             {
                 Console.Error.WriteLine("bind-verify 需要从 stdin 读取 \"{binding_code}:{nonce}\"");
+                return 1;
+            }
+
+            var delimiter = input.IndexOf(':');
+            if (delimiter != 6 || !CreateBindingStore(AppConfig.Load()).Consume(input[..delimiter]))
+            {
+                Console.Error.WriteLine("绑定码无效、已过期或已被使用");
                 return 1;
             }
 
@@ -225,5 +242,11 @@ file_path = ""~/.agentshell/daemon.log""");
             Console.Error.WriteLine($"保存 Token 失败: {ex.Message}");
             return 1;
         }
+    }
+
+    private static BindingCodeStore CreateBindingStore(AppConfig config)
+    {
+        var stateDirectory = Path.GetDirectoryName(AppConfig.DefaultPath) ?? throw new InvalidOperationException("配置目录无效");
+        return new BindingCodeStore(Path.Combine(stateDirectory, "binding-code.state"), TimeProvider.System);
     }
 }
