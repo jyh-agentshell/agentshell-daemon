@@ -36,10 +36,14 @@ public sealed class ReportSigner
         if (nonce.Length < 16)
             throw new InvalidOperationException("上报 nonce 至少需要 16 字节。");
 
+        // 线协议时间戳精度固定为毫秒。必须在签名前截断，避免 JSON 转换器序列化后
+        // 改变时间戳文本，导致服务端使用收到的信封验签失败。
+        var sourceTimestamp = timestamp ?? _clock.GetUtcNow();
+        var emittedAt = DateTimeOffset.FromUnixTimeMilliseconds(sourceTimestamp.ToUnixTimeMilliseconds());
         var envelope = new ReportEnvelope(
             "0.3.0",
             hostId,
-            timestamp ?? _clock.GetUtcNow(),
+            emittedAt,
             Convert.ToBase64String(nonce),
             capabilities,
             payloadType,

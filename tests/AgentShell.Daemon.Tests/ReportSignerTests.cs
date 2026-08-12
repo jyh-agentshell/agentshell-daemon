@@ -40,4 +40,22 @@ public sealed class ReportSignerTests
             ReportSigner.BuildSignedBytes(envelope),
             Convert.FromBase64String(envelope.Signature)));
     }
+
+    [Fact]
+    public void Sign_签名前将时间截断为线协议毫秒精度()
+    {
+        var signer = new ReportSigner(
+            Enumerable.Repeat((byte)1, 32).ToArray(),
+            TimeProvider.System,
+            () => Enumerable.Repeat((byte)2, 16).ToArray());
+
+        var envelope = signer.Sign(
+            "11111111-1111-4111-8111-111111111111",
+            "agent_state",
+            "{}"u8.ToArray(),
+            ["agent_state"],
+            new DateTimeOffset(2026, 8, 11, 0, 0, 0, 123, TimeSpan.Zero).AddTicks(4567));
+
+        Assert.Equal("2026-08-11T00:00:00.123Z", ProtocolTimestamp.Format(envelope.Timestamp));
+    }
 }
