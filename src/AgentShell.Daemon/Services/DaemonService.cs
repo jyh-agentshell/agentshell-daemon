@@ -138,7 +138,7 @@ public sealed class DaemonService : BackgroundService
                     PreviousState = previousState,
                     Detail = detail,
                     Source = source,
-                    ProtocolVersion = "0.2.0",
+                    ProtocolVersion = "0.3.1",
                     DaemonVersion = _daemonVersion
                 };
 
@@ -186,7 +186,7 @@ public sealed class DaemonService : BackgroundService
                     MultiplexerType = MapMultiplexerType(_monitor.Type),
                     SessionName = session,
                     AgentType = AgentType.None,
-                    ProtocolVersion = "0.2.0",
+                    ProtocolVersion = "0.3.1",
                     DaemonVersion = _daemonVersion
                 };
                 if (await _reporter.ReportSessionLifecycleAsync(lifecycleEvt, ct) == ReportResult.Accepted)
@@ -209,7 +209,7 @@ public sealed class DaemonService : BackgroundService
                 MultiplexerType = MapMultiplexerType(_monitor.Type),
                 SessionName = session,
                 AgentType = AgentType.None,
-                ProtocolVersion = "0.2.0",
+                ProtocolVersion = "0.3.1",
                 DaemonVersion = _daemonVersion
             };
             if (await _reporter.ReportSessionLifecycleAsync(lifecycleEvt, ct) == ReportResult.Accepted)

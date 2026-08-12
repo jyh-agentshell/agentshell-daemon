@@ -32,7 +32,7 @@ public sealed class ReportSignerTests
             ["agent_state"],
             DateTimeOffset.Parse("2026-08-11T00:00:00Z"));
 
-        Assert.Equal("0.3.0", envelope.ProtocolVersion);
+        Assert.Equal("0.3.1", envelope.ProtocolVersion);
         Assert.Equal("2026-08-11T00:00:00.000Z", ProtocolTimestamp.Format(envelope.Timestamp));
         Assert.Equal(Convert.ToBase64String(Enumerable.Repeat((byte)7, 16).ToArray()), envelope.Nonce);
         Assert.True(Ed25519KeyManager.Verify(

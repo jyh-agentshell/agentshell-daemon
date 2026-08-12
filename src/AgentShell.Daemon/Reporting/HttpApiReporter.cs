@@ -31,7 +31,7 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
 
         _tokenManager = tokenManager;
         _logger = logger;
-        _daemonVersion = GetType().Assembly.GetName().Version?.ToString() ?? "0.3.0";
+        _daemonVersion = GetType().Assembly.GetName().Version?.ToString() ?? "0.3.1";
         _hostId = config.Reporting.HostId;
         var (privateKey, _) = Ed25519KeyManager.LoadOrCreateKeyPair(config.Binding.KeyPath);
         _reportSigner = new ReportSigner(privateKey, TimeProvider.System);

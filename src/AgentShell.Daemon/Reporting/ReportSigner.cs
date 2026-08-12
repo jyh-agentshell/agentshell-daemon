@@ -41,7 +41,7 @@ public sealed class ReportSigner
         var sourceTimestamp = timestamp ?? _clock.GetUtcNow();
         var emittedAt = DateTimeOffset.FromUnixTimeMilliseconds(sourceTimestamp.ToUnixTimeMilliseconds());
         var envelope = new ReportEnvelope(
-            "0.3.0",
+            "0.3.1",
             hostId,
             emittedAt,
             Convert.ToBase64String(nonce),
