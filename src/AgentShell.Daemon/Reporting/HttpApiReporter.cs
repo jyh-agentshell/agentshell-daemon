@@ -1,6 +1,8 @@
 using System.Net.Http.Json;
+using System.Text.Json;
 using AgentShell.Daemon.Auth;
 using AgentShell.Daemon.Configuration;
+using AgentShell.Daemon.Security;
 using AgentShell.Protocol.Models;
 using Microsoft.Extensions.Logging;
 
@@ -16,15 +18,23 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
     private readonly TokenManager _tokenManager;
     private readonly ILogger<HttpApiReporter> _logger;
     private readonly string _daemonVersion;
+    private readonly ReportSigner _reportSigner;
+    private readonly string _hostId;
 
     public HttpApiReporter(
         AppConfig config,
         TokenManager tokenManager,
         ILogger<HttpApiReporter> logger)
     {
+        if (!IsSecureApiBaseUrl(config.Reporting.ApiBaseUrl))
+            throw new InvalidOperationException("reporting.api_base_url 必须使用 HTTPS。");
+
         _tokenManager = tokenManager;
         _logger = logger;
-        _daemonVersion = GetType().Assembly.GetName().Version?.ToString() ?? "0.2.0";
+        _daemonVersion = GetType().Assembly.GetName().Version?.ToString() ?? "0.3.0";
+        _hostId = config.Reporting.HostId;
+        var (privateKey, _) = Ed25519KeyManager.LoadOrCreateKeyPair(config.Binding.KeyPath);
+        _reportSigner = new ReportSigner(privateKey, TimeProvider.System);
 
         _httpClient = new HttpClient
         {
@@ -45,7 +55,7 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "sessions/report")
         {
-            Content = JsonContent.Create(stateEvent)
+            Content = JsonContent.Create(CreateEnvelope("agent_state", stateEvent))
         };
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
@@ -71,7 +81,7 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "sessions/lifecycle")
         {
-            Content = JsonContent.Create(lifecycleEvent)
+            Content = JsonContent.Create(CreateEnvelope("session_lifecycle", lifecycleEvent))
         };
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
@@ -108,4 +118,14 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
     {
         _httpClient.Dispose();
     }
+
+    public static bool IsSecureApiBaseUrl(string? value) =>
+        Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
+
+    private ReportEnvelope CreateEnvelope<T>(string payloadType, T payload) =>
+        _reportSigner.Sign(
+            _hostId,
+            payloadType,
+            JsonSerializer.SerializeToUtf8Bytes(payload),
+            ["agent_state", "session_lifecycle"]);
 }
