@@ -44,13 +44,13 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
         _httpClient.DefaultRequestHeaders.Add("X-Agentshell-Daemon-Version", _daemonVersion);
     }
 
-    public async Task ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
+    public async Task<ReportResult> ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
     {
         var token = await _tokenManager.GetAccessTokenAsync(ct);
         if (token == null)
         {
             _logger.LogWarning("无法获取 Access Token（状态: {State}），跳过上报", _tokenManager.CurrentState);
-            return;
+            return ReportResult.AuthenticationRequired;
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "sessions/report")
@@ -59,7 +59,10 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
         };
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
-        var response = await _httpClient.SendAsync(request, ct);
+        HttpResponseMessage response;
+        try { response = await _httpClient.SendAsync(request, ct); }
+        catch (HttpRequestException) { return ReportResult.RetryableFailure; }
+        using (response)
         if (response.IsSuccessStatusCode)
         {
             _logger.LogDebug("状态上报成功: {SessionId} → {State}", stateEvent.SessionId, stateEvent.State);
@@ -68,15 +71,16 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
         {
             _logger.LogWarning("状态上报失败: {StatusCode} ({SessionId})", response.StatusCode, stateEvent.SessionId);
         }
+        return ToReportResult(response.StatusCode);
     }
 
-    public async Task ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default)
+    public async Task<ReportResult> ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default)
     {
         var token = await _tokenManager.GetAccessTokenAsync(ct);
         if (token == null)
         {
             _logger.LogWarning("无法获取 Access Token（状态: {State}），跳过上报", _tokenManager.CurrentState);
-            return;
+            return ReportResult.AuthenticationRequired;
         }
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "sessions/lifecycle")
@@ -85,7 +89,10 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
         };
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
-        var response = await _httpClient.SendAsync(request, ct);
+        HttpResponseMessage response;
+        try { response = await _httpClient.SendAsync(request, ct); }
+        catch (HttpRequestException) { return ReportResult.RetryableFailure; }
+        using (response)
         if (response.IsSuccessStatusCode)
         {
             _logger.LogDebug("生命周期上报成功: {SessionId}", lifecycleEvent.SessionId);
@@ -94,6 +101,7 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
         {
             _logger.LogWarning("生命周期上报失败: {StatusCode} ({SessionId})", response.StatusCode, lifecycleEvent.SessionId);
         }
+        return ToReportResult(response.StatusCode);
     }
 
     public async Task<bool> PingAsync(CancellationToken ct = default)
@@ -128,4 +136,14 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
             payloadType,
             JsonSerializer.SerializeToUtf8Bytes(payload),
             ["agent_state", "session_lifecycle"]);
+
+    private static ReportResult ToReportResult(System.Net.HttpStatusCode statusCode) =>
+        ((int)statusCode) switch
+        {
+            >= 200 and < 300 => ReportResult.Accepted,
+            401 => ReportResult.AuthenticationRequired,
+            426 => ReportResult.IncompatibleProtocol,
+            409 or 429 or >= 500 => ReportResult.RetryableFailure,
+            _ => ReportResult.Rejected
+        };
 }

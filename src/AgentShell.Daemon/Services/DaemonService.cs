@@ -142,8 +142,15 @@ public sealed class DaemonService : BackgroundService
                     DaemonVersion = _daemonVersion
                 };
 
-                await _reporter.ReportAgentStateAsync(evt, ct);
-                _sessionStates[sessionName] = new SessionState(newState, agentType);
+                var result = await _reporter.ReportAgentStateAsync(evt, ct);
+                if (result == ReportResult.Accepted)
+                {
+                    _sessionStates[sessionName] = new SessionState(newState, agentType);
+                }
+                else
+                {
+                    _logger.LogWarning("状态上报未被确认: {SessionId} ({Result})，将在下次轮询重试", sessionId, result);
+                }
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -168,7 +175,6 @@ public sealed class DaemonService : BackgroundService
         {
             if (!_knownSessions.Contains(session))
             {
-                _knownSessions.Add(session);
                 _logger.LogInformation("会话创建: {Session}", session);
 
                 var lifecycleEvt = new SessionLifecycleEvent
@@ -183,7 +189,8 @@ public sealed class DaemonService : BackgroundService
                     ProtocolVersion = "0.2.0",
                     DaemonVersion = _daemonVersion
                 };
-                await _reporter.ReportSessionLifecycleAsync(lifecycleEvt, ct);
+                if (await _reporter.ReportSessionLifecycleAsync(lifecycleEvt, ct) == ReportResult.Accepted)
+                    _knownSessions.Add(session);
             }
         }
 
@@ -191,7 +198,6 @@ public sealed class DaemonService : BackgroundService
         var destroyed = _knownSessions.Where(s => !currentSet.Contains(s)).ToList();
         foreach (var session in destroyed)
         {
-            _knownSessions.Remove(session);
             _logger.LogInformation("会话销毁: {Session}", session);
 
             var lifecycleEvt = new SessionLifecycleEvent
@@ -206,7 +212,8 @@ public sealed class DaemonService : BackgroundService
                 ProtocolVersion = "0.2.0",
                 DaemonVersion = _daemonVersion
             };
-            await _reporter.ReportSessionLifecycleAsync(lifecycleEvt, ct);
+            if (await _reporter.ReportSessionLifecycleAsync(lifecycleEvt, ct) == ReportResult.Accepted)
+                _knownSessions.Remove(session);
         }
 
         foreach (var session in _sessionStates.Keys.Where(s => !currentSet.Contains(s)).ToArray())
