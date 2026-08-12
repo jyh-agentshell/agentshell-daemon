@@ -93,11 +93,13 @@ public static class Program
                 return 0;
             case "bind-verify":
                 return HandleBindVerify(args);
+            case "register-key":
+                return HandleRegisterKey();
             case "--set-token":
                 return HandleSetToken();
             default:
                 Console.Error.WriteLine($"未知命令: {args[0]}");
-                Console.Error.WriteLine("可用命令: --generate-config | --version | --set-token");
+                Console.Error.WriteLine("可用命令: --generate-config | --generate-binding-code | bind-verify | register-key | --set-token | --version");
                 return 1;
         }
     }
@@ -240,6 +242,36 @@ file_path = ""~/.agentshell/daemon.log""");
         catch (Exception ex)
         {
             Console.Error.WriteLine($"保存 Token 失败: {ex.Message}");
+            return 1;
+        }
+    }
+
+    /// <summary>
+    /// 执行 register-key CLI 子命令。
+    /// 从 stdin 接收 App 刚取得的一次性登记令牌，向 HTTPS 网关登记 daemon 公钥。
+    /// </summary>
+    private static int HandleRegisterKey()
+    {
+        try
+        {
+            var token = Console.In.ReadToEnd().Trim();
+            if (string.IsNullOrEmpty(token))
+            {
+                Console.Error.WriteLine("错误：未提供主机登记令牌");
+                return 1;
+            }
+
+            var config = AppConfig.Load();
+            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            var registrar = new HostKeyRegistrar(config, httpClient);
+            registrar.RegisterAsync(token).GetAwaiter().GetResult();
+            Console.WriteLine("主机公钥已登记");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            // 不得将一次性令牌写入 stderr 或日志。
+            Console.Error.WriteLine($"主机公钥登记失败: {ex.Message}");
             return 1;
         }
     }
