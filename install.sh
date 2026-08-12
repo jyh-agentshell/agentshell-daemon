@@ -11,9 +11,10 @@ set -euo pipefail
 
 # ─── 配置 ───────────────────────────────────────────────
 REPO="jyh-agentshell/agentshell-daemon"
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="${AGENTSHELL_INSTALL_DIR:-/usr/local/bin}"
 BINARY_NAME="agentshell-daemon"
-SERVICE_NAME="agentshell-daemon"
+SERVICE_NAME="${AGENTSHELL_SERVICE_NAME:-agentshell-daemon}"
+SYSTEMD_DIR="${AGENTSHELL_SYSTEMD_DIR:-/etc/systemd/system}"
 
 # 颜色输出
 RED='\033[0;31m'
@@ -26,19 +27,23 @@ log_warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 log_error() { echo -e "${RED}[x]${NC} $1"; }
 
 # ─── 权限检查 ──────────────────────────────────────────
-if [ "$(id -u)" -ne 0 ]; then
+if [ "${AGENTSHELL_SKIP_ROOT_CHECK:-0}" != "1" ] && [ "$(id -u)" -ne 0 ]; then
     log_error "请使用 sudo 运行此脚本"
     exit 1
 fi
 
 # 获取实际用户的 HOME 目录（sudo 下 ${HOME} 是 /root）
-REAL_USER="${SUDO_USER:-$(who am i | awk '{print $1}')}"
+REAL_USER="${SUDO_USER:-$(id -un)}"
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-    REAL_HOME="$(eval echo ~"$REAL_USER")"
+    REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+    if [ -z "$REAL_HOME" ]; then
+        log_error "无法解析用户 ${REAL_USER} 的主目录"
+        exit 1
+    fi
 else
-    REAL_HOME="$HOME"
+    REAL_HOME="${HOME:-/root}"
 fi
-CONFIG_DIR="${REAL_HOME}/.agentshell"
+CONFIG_DIR="${AGENTSHELL_CONFIG_DIR:-${REAL_HOME}/.agentshell}"
 log_info "实际用户: ${REAL_USER:-root}, 配置目录: ${CONFIG_DIR}"
 
 # ─── 平台检测 ──────────────────────────────────────────
@@ -123,7 +128,8 @@ if [ ! -f "${CONFIG_DIR}/agent.key" ]; then
 fi
 
 # ─── 安装 systemd service ───────────────────────────────
-cat > "/etc/systemd/system/${SERVICE_NAME}.service" << EOF
+mkdir -p "$SYSTEMD_DIR"
+cat > "${SYSTEMD_DIR}/${SERVICE_NAME}.service" << EOF
 [Unit]
 Description=AgentShell Daemon
 After=network-online.target
