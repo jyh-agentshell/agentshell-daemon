@@ -82,7 +82,8 @@ public sealed class TmuxMonitor : IMonitorTarget
                 return string.Empty;
 
             var result = await RunTmuxAsync(
-                $"capture-pane -p -t \"{safe}\" -S -200",
+                // -e 保留 OSC 控制序列，状态检测器可优先解析结构化标记。
+                $"capture-pane -p -e -t \"{safe}\" -S -200",
                 ct);
             IsHealthy = result.ExitCode == 0;
             return result.ExitCode == 0 ? result.Stdout : string.Empty;
