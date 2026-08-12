@@ -85,7 +85,12 @@ public static class Program
                 GenerateConfig();
                 return 0;
             case "--generate-binding-code":
-                return BindingNotImplemented();
+                if (args.Length > 2)
+                {
+                    Console.Error.WriteLine("--generate-binding-code 最多接受一个 SSH 主机名参数");
+                    return 1;
+                }
+                return GenerateBindingCode(args.ElementAtOrDefault(1));
             case "--version":
             case "-v":
                 var version = typeof(Program).Assembly.GetName().Version?.ToString() ?? "0.2.0";
@@ -93,11 +98,13 @@ public static class Program
                 return 0;
             case "bind-verify":
                 return HandleBindVerify(args);
+            case "register-key":
+                return HandleRegisterKey();
             case "--set-token":
                 return HandleSetToken();
             default:
                 Console.Error.WriteLine($"未知命令: {args[0]}");
-                Console.Error.WriteLine("可用命令: --generate-config | --version | --set-token");
+                Console.Error.WriteLine("可用命令: --generate-config | --generate-binding-code | bind-verify | register-key | --set-token | --version");
                 return 1;
         }
     }
@@ -147,10 +154,28 @@ level = ""Information""
 file_path = ""~/.agentshell/daemon.log""");
     }
 
-    private static int BindingNotImplemented()
+    private static int GenerateBindingCode(string? sshHostname)
     {
-        Console.Error.WriteLine("设备绑定尚未实现；未生成绑定码或签名。守护进程拒绝伪造服务端绑定结果。");
-        return 1;
+        try
+        {
+            var config = AppConfig.Load();
+            var code = CreateBindingStore(config).Generate(TimeSpan.FromSeconds(config.Binding.CodeTtlSeconds));
+            if (string.IsNullOrWhiteSpace(sshHostname))
+            {
+                Console.WriteLine(code);
+                return 0;
+            }
+
+            if (sshHostname.Any(char.IsWhiteSpace) || sshHostname.Any(char.IsControl))
+                throw new ArgumentException("SSH 主机名不能包含空白或控制字符。");
+            Console.WriteLine($"agentshell://bind?code={code}&host={Uri.EscapeDataString(sshHostname)}");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"生成绑定码失败: {ex.Message}");
+            return 1;
+        }
     }
 
     /// <summary>
@@ -168,6 +193,13 @@ file_path = ""~/.agentshell/daemon.log""");
             if (string.IsNullOrEmpty(input))
             {
                 Console.Error.WriteLine("bind-verify 需要从 stdin 读取 \"{binding_code}:{nonce}\"");
+                return 1;
+            }
+
+            var delimiter = input.IndexOf(':');
+            if (delimiter != 6 || input.Length == delimiter + 1 || !CreateBindingStore(AppConfig.Load()).Consume(input[..delimiter]))
+            {
+                Console.Error.WriteLine("绑定码无效、已过期或已被使用");
                 return 1;
             }
 
@@ -225,5 +257,41 @@ file_path = ""~/.agentshell/daemon.log""");
             Console.Error.WriteLine($"保存 Token 失败: {ex.Message}");
             return 1;
         }
+    }
+
+    /// <summary>
+    /// 执行 register-key CLI 子命令。
+    /// 从 stdin 接收 App 刚取得的一次性登记令牌，向 HTTPS 网关登记 daemon 公钥。
+    /// </summary>
+    private static int HandleRegisterKey()
+    {
+        try
+        {
+            var token = Console.In.ReadToEnd().Trim();
+            if (string.IsNullOrEmpty(token))
+            {
+                Console.Error.WriteLine("错误：未提供主机登记令牌");
+                return 1;
+            }
+
+            var config = AppConfig.Load();
+            using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            var registrar = new HostKeyRegistrar(config, httpClient);
+            registrar.RegisterAsync(token).GetAwaiter().GetResult();
+            Console.WriteLine("主机公钥已登记");
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            // 不得将一次性令牌写入 stderr 或日志。
+            Console.Error.WriteLine($"主机公钥登记失败: {ex.Message}");
+            return 1;
+        }
+    }
+
+    private static BindingCodeStore CreateBindingStore(AppConfig config)
+    {
+        var stateDirectory = Path.GetDirectoryName(AppConfig.DefaultPath) ?? throw new InvalidOperationException("配置目录无效");
+        return new BindingCodeStore(Path.Combine(stateDirectory, "binding-code.state"), TimeProvider.System);
     }
 }

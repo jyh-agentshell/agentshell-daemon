@@ -15,12 +15,6 @@ public interface IMonitorTarget : IDisposable
     /// <returns>终端文本内容（纯文本）</returns>
     Task<string> CapturePaneAsync(string sessionName, CancellationToken ct = default);
 
-    /// <summary>向指定会话的终端发送按键</summary>
-    /// <param name="sessionName">目标会话名</param>
-    /// <param name="keys">要发送的按键序列（如 "y\n"）</param>
-    /// <param name="ct">取消令牌</param>
-    Task SendKeysAsync(string sessionName, string keys, CancellationToken ct = default);
-
     /// <summary>复用器类型标识</summary>
     string Type { get; }
 

@@ -64,6 +64,20 @@ public sealed class DaemonServiceTests
     }
 
     [Fact]
+    public void Load_报告地址使用HTTP时安全失败()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"agentshell-{Guid.NewGuid():N}.toml");
+        File.WriteAllText(path, "[reporting]\nhost_id = \"9e01c440-8e39-4b84-9af7-67455467a837\"\napi_base_url = \"http://api.example\"\n");
+
+        try
+        {
+            var exception = Assert.Throws<InvalidOperationException>(() => AppConfig.Load(path));
+            Assert.Contains("HTTPS", exception.Message, StringComparison.Ordinal);
+        }
+        finally { File.Delete(path); }
+    }
+
+    [Fact]
     public async Task TickAsync_一个会话捕获失败时仍上报其后的会话()
     {
         var reporter = new RecordingReporter();
@@ -136,8 +150,6 @@ public sealed class DaemonServiceTests
         public Task<string> CapturePaneAsync(string sessionName, CancellationToken ct = default) =>
             Task.FromResult(panes[sessionName]);
 
-        public Task SendKeysAsync(string sessionName, string keys, CancellationToken ct = default) => Task.CompletedTask;
-
         public void Dispose()
         {
         }
@@ -159,8 +171,6 @@ public sealed class DaemonServiceTests
             return Task.FromResult(panes[sessionName]);
         }
 
-        public Task SendKeysAsync(string sessionName, string keys, CancellationToken ct = default) => Task.CompletedTask;
-
         public void Dispose()
         {
         }
@@ -171,16 +181,16 @@ public sealed class DaemonServiceTests
         public List<AgentStateEvent> StateEvents { get; } = [];
         public List<SessionLifecycleEvent> LifecycleEvents { get; } = [];
 
-        public Task ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
+        public Task<ReportResult> ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
         {
             StateEvents.Add(stateEvent);
-            return Task.CompletedTask;
+            return Task.FromResult(ReportResult.Accepted);
         }
 
-        public Task ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default)
+        public Task<ReportResult> ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default)
         {
             LifecycleEvents.Add(lifecycleEvent);
-            return Task.CompletedTask;
+            return Task.FromResult(ReportResult.Accepted);
         }
 
         public Task<bool> PingAsync(CancellationToken ct = default) => Task.FromResult(true);
@@ -193,17 +203,17 @@ public sealed class DaemonServiceTests
         public int StateReportAttempts { get; private set; }
         public List<AgentStateEvent> StateEvents { get; } = [];
 
-        public Task ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
+        public Task<ReportResult> ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
         {
             StateReportAttempts++;
             if (_remainingFailures-- > 0)
-                throw new InvalidOperationException("模拟上报失败");
+                return Task.FromResult(ReportResult.RetryableFailure);
 
             StateEvents.Add(stateEvent);
-            return Task.CompletedTask;
+            return Task.FromResult(ReportResult.Accepted);
         }
 
-        public Task ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<ReportResult> ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default) => Task.FromResult(ReportResult.Accepted);
 
         public Task<bool> PingAsync(CancellationToken ct = default) => Task.FromResult(true);
     }

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # AgentShell 守护进程一键安装脚本
-# 用法: curl -fsSL https://raw.githubusercontent.com/jyh-agentshell/agentshell-daemon/main/install.sh | bash
+# 用法见 README：先下载并人工校验脚本，再以 sudo 执行。
 #
 # 此脚本做三件事：
 # 1. 从 GitHub Releases 下载最新二进制
@@ -11,9 +11,10 @@ set -euo pipefail
 
 # ─── 配置 ───────────────────────────────────────────────
 REPO="jyh-agentshell/agentshell-daemon"
-INSTALL_DIR="/usr/local/bin"
+INSTALL_DIR="${AGENTSHELL_INSTALL_DIR:-/usr/local/bin}"
 BINARY_NAME="agentshell-daemon"
-SERVICE_NAME="agentshell-daemon"
+SERVICE_NAME="${AGENTSHELL_SERVICE_NAME:-agentshell-daemon}"
+SYSTEMD_DIR="${AGENTSHELL_SYSTEMD_DIR:-/etc/systemd/system}"
 
 # 颜色输出
 RED='\033[0;31m'
@@ -26,19 +27,23 @@ log_warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 log_error() { echo -e "${RED}[x]${NC} $1"; }
 
 # ─── 权限检查 ──────────────────────────────────────────
-if [ "$(id -u)" -ne 0 ]; then
+if [ "${AGENTSHELL_SKIP_ROOT_CHECK:-0}" != "1" ] && [ "$(id -u)" -ne 0 ]; then
     log_error "请使用 sudo 运行此脚本"
     exit 1
 fi
 
 # 获取实际用户的 HOME 目录（sudo 下 ${HOME} 是 /root）
-REAL_USER="${SUDO_USER:-$(who am i | awk '{print $1}')}"
+REAL_USER="${SUDO_USER:-$(id -un)}"
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-    REAL_HOME="$(eval echo ~"$REAL_USER")"
+    REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+    if [ -z "$REAL_HOME" ]; then
+        log_error "无法解析用户 ${REAL_USER} 的主目录"
+        exit 1
+    fi
 else
-    REAL_HOME="$HOME"
+    REAL_HOME="${HOME:-/root}"
 fi
-CONFIG_DIR="${REAL_HOME}/.agentshell"
+CONFIG_DIR="${AGENTSHELL_CONFIG_DIR:-${REAL_HOME}/.agentshell}"
 log_info "实际用户: ${REAL_USER:-root}, 配置目录: ${CONFIG_DIR}"
 
 # ─── 平台检测 ──────────────────────────────────────────
@@ -56,6 +61,15 @@ case "$ARCH" in
     *)       log_error "不支持的架构: $ARCH"; exit 1 ;;
 esac
 
+# install.sh 只承担首次安装；更新必须经过后续独立的安全更新器。
+if [ -e "${INSTALL_DIR}/${BINARY_NAME}" ]; then
+    log_error "检测到既有安装；install.sh 不承担更新。请等待 P6 安全更新器或先按卸载文档处理。"
+    exit 2
+fi
+
+TEMP_DIR=$(mktemp -d)
+trap 'rm -rf -- "$TEMP_DIR"' EXIT
+
 # ─── 获取最新版本号 ────────────────────────────────────
 log_info "正在查询最新版本..."
 VERSION=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | grep '"tag_name":' | sed -E 's/.*"v?([^"]+)".*/\1/')
@@ -71,7 +85,6 @@ log_info "最新版本: v${VERSION}"
 DOWNLOAD_URL="https://github.com/${REPO}/releases/download/v${VERSION}/${BINARY_NAME}-${PLATFORM}-${ARCH}"
 CHECKSUM_URL="${DOWNLOAD_URL}.sha256"
 
-TEMP_DIR=$(mktemp -d)
 BINARY_PATH="${TEMP_DIR}/${BINARY_NAME}"
 
 log_info "下载: ${DOWNLOAD_URL}"
@@ -88,7 +101,6 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
     log_error "SHA256 校验失败！"
     log_error "  期望: $EXPECTED"
     log_error "  实际: $ACTUAL"
-    rm -rf "$TEMP_DIR"
     exit 1
 fi
 
@@ -116,7 +128,8 @@ if [ ! -f "${CONFIG_DIR}/agent.key" ]; then
 fi
 
 # ─── 安装 systemd service ───────────────────────────────
-cat > "/etc/systemd/system/${SERVICE_NAME}.service" << EOF
+mkdir -p "$SYSTEMD_DIR"
+cat > "${SYSTEMD_DIR}/${SERVICE_NAME}.service" << EOF
 [Unit]
 Description=AgentShell Daemon
 After=network-online.target
@@ -154,6 +167,3 @@ log_info "  配置文件: ${CONFIG_DIR}/agentshell.toml"
 log_info "  日志:     journalctl -u ${SERVICE_NAME} -f"
 log_warn "  设备绑定尚未实现；当前安装不会生成可用于服务端绑定的绑定码。"
 log_info "════════════════════════════════════════════════"
-
-# ─── 清理 ───────────────────────────────────────────────
-rm -rf "$TEMP_DIR"

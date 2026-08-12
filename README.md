@@ -13,23 +13,30 @@
 - **配置系统**: `agentshell.toml` + Tomlyn 解析；缺失或无效的主机身份配置会拒绝启动
 - **零依赖部署**: `dotnet publish --self-contained` 编译为单文件二进制
 
-### 规划中（Phase 2+）
+### 已实现（Phase 2）
 
-- **安全绑定**: Ed25519 密钥对 + 挑战-应答验证设备所有权
-- **HTTPS 上报**: 通过 `IApiReporter` 接口上报到 AgentShell 网关（当前 `NoOpReporter` 占位）
+- **安全绑定**: Ed25519 密钥对、一次性注册令牌、公钥预登记与挑战-应答验证设备所有权
+- **HTTPS 上报**: `HttpApiReporter` 对状态信封签名，服务端按主机身份和协议窗口验证
+
+### 规划中（Phase 4+）
+
 - **局域网直连**: 内嵌 Kestrel HTTP Server + mDNS 广播
 - **自更新**: GitHub Releases HTTPS + SHA256 校验 + rename-and-restart
 
 ## 安装
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jyh-agentshell/agentshell-daemon/main/install.sh | bash
+curl -fL https://raw.githubusercontent.com/jyh-agentshell/agentshell-daemon/main/install.sh -o install.sh
+less install.sh
+sudo bash install.sh
 ```
 
 安装脚本做三件事：
 1. 从 GitHub Releases 下载最新二进制
 2. SHA256 校验
 3. 写入 systemd service 并启动
+
+脚本仅用于首次安装。检测到既有二进制时会失败关闭，绝不把下载覆盖伪装成更新；后续更新须使用专门的校验、原子替换与重启流程。
 
 ## 配置
 

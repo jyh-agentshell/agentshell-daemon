@@ -73,6 +73,9 @@ public sealed record AppConfig
         if (!Guid.TryParse(Reporting.HostId, out _))
             throw new InvalidOperationException("reporting.host_id 必须是有效 UUID");
 
+        if (!Uri.TryCreate(Reporting.ApiBaseUrl, UriKind.Absolute, out var apiUri) || apiUri.Scheme != Uri.UriSchemeHttps)
+            throw new InvalidOperationException("reporting.api_base_url 必须使用 HTTPS");
+
         if (Lan.Port is < 1 or > 65535)
             throw new InvalidOperationException("lan.port 必须在 1-65535 范围内");
 

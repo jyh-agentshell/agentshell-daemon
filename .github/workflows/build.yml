@@ -24,6 +24,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: jyh-agentshell/agentshell-protocol
+          # 与 daemon 的 0.3.1 兼容窗口一起评审；不得随默认分支漂移。
+          ref: b0050f05edbd
           path: agentshell-protocol
 
       - name: Setup .NET
@@ -60,6 +62,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: jyh-agentshell/agentshell-protocol
+          # 发布产物必须使用与 build job 相同的已验证契约。
+          ref: b0050f05edbd
           path: agentshell-protocol
 
       - name: Setup .NET

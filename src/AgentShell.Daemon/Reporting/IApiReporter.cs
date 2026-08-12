@@ -9,13 +9,23 @@ namespace AgentShell.Daemon.Reporting;
 public interface IApiReporter
 {
     /// <summary>上报 Agent 状态变化</summary>
-    Task ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default);
+    Task<ReportResult> ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default);
 
     /// <summary>上报会话生命周期事件</summary>
-    Task ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default);
+    Task<ReportResult> ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default);
 
     /// <summary>检查网关连接是否正常</summary>
     Task<bool> PingAsync(CancellationToken ct = default);
+}
+
+/// <summary>网关对上报的结构化处置结果。</summary>
+public enum ReportResult
+{
+    Accepted,
+    RetryableFailure,
+    AuthenticationRequired,
+    IncompatibleProtocol,
+    Rejected
 }
 
 /// <summary>
@@ -24,11 +34,11 @@ public interface IApiReporter
 /// </summary>
 public sealed class NoOpReporter : IApiReporter
 {
-    public Task ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
-        => Task.CompletedTask;
+    public Task<ReportResult> ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
+        => Task.FromResult(ReportResult.Accepted);
 
-    public Task ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default)
-        => Task.CompletedTask;
+    public Task<ReportResult> ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default)
+        => Task.FromResult(ReportResult.Accepted);
 
     public Task<bool> PingAsync(CancellationToken ct = default)
         => Task.FromResult(true);
