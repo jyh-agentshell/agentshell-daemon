@@ -21,20 +21,22 @@ public sealed class TokenStore
     /// </summary>
     public async Task SaveAsync(string token, CancellationToken ct = default)
     {
+        if (string.IsNullOrWhiteSpace(token)) throw new ArgumentException("Token 不能为空。", nameof(token));
         var dir = Path.GetDirectoryName(_tokenPath);
         if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
             Directory.CreateDirectory(dir);
 
-        await File.WriteAllTextAsync(_tokenPath, token, ct);
-
+        var temporary = _tokenPath + ".new";
         try
         {
+            await File.WriteAllTextAsync(temporary, token, ct);
             if (!OperatingSystem.IsWindows())
-                File.SetUnixFileMode(_tokenPath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            File.Move(temporary, _tokenPath, true);
         }
-        catch
+        finally
         {
-            // 权限设置失败不阻塞
+            if (File.Exists(temporary)) File.Delete(temporary);
         }
     }
 
