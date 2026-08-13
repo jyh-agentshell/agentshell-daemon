@@ -119,13 +119,8 @@ if [ ! -f "${CONFIG_DIR}/agentshell.toml" ]; then
     "${INSTALL_DIR}/${BINARY_NAME}" --generate-config > "${CONFIG_DIR}/agentshell.toml"
 fi
 
-# ─── 生成 Ed25519 密钥对 ───────────────────────────────
-if [ ! -f "${CONFIG_DIR}/agent.key" ]; then
-    log_info "生成 Ed25519 密钥对..."
-    openssl genpkey -algorithm Ed25519 -out "${CONFIG_DIR}/agent.key"
-    openssl pkey -in "${CONFIG_DIR}/agent.key" -pubout -out "${CONFIG_DIR}/agent.pub"
-    chmod 600 "${CONFIG_DIR}/agent.key"
-fi
+# Ed25519 原始密钥由 daemon 首次启动时生成；不得以 OpenSSL PEM 覆盖该格式。
+log_info "Ed25519 密钥将在 daemon 首次启动时生成"
 
 # ─── 安装 systemd service ───────────────────────────────
 mkdir -p "$SYSTEMD_DIR"

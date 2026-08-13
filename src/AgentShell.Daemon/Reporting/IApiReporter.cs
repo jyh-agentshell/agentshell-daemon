@@ -8,6 +8,9 @@ namespace AgentShell.Daemon.Reporting;
 /// </summary>
 public interface IApiReporter
 {
+    /// <summary>当前是否具备上报所需的有效认证凭据。</summary>
+    Task<bool> IsReadyToReportAsync(CancellationToken ct = default) => Task.FromResult(true);
+
     /// <summary>上报 Agent 状态变化</summary>
     Task<ReportResult> ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default);
 

@@ -92,6 +92,10 @@ public sealed class DaemonService : BackgroundService
     /// </summary>
     private async Task TickAsync(CancellationToken ct)
     {
+        // 未绑定或令牌不可用时不扫描会话；绑定成功后下一轮自动发送完整初始状态。
+        if (!await _reporter.IsReadyToReportAsync(ct))
+            return;
+
         var sessions = await _monitor.GetSessionsAsync(ct);
 
         // 会话生命周期检测

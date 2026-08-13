@@ -44,6 +44,9 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
         _httpClient.DefaultRequestHeaders.Add("X-Agentshell-Daemon-Version", _daemonVersion);
     }
 
+    public async Task<bool> IsReadyToReportAsync(CancellationToken ct = default) =>
+        await _tokenManager.GetAccessTokenAsync(ct) != null;
+
     public async Task<ReportResult> ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
     {
         var token = await _tokenManager.GetAccessTokenAsync(ct);

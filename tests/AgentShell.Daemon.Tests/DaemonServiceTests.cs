@@ -13,6 +13,17 @@ namespace AgentShell.Daemon.Tests;
 public sealed class DaemonServiceTests
 {
     [Fact]
+    public void TmuxMonitor_接受纯数字会话名()
+    {
+        var monitor = new TmuxMonitor(NullLogger<TmuxMonitor>.Instance, new AppConfig());
+        var method = typeof(TmuxMonitor).GetMethod("SanitizeSessionName", BindingFlags.Instance | BindingFlags.NonPublic);
+
+        var sanitized = method!.Invoke(monitor, ["0"]);
+
+        Assert.Equal("0", sanitized);
+    }
+
+    [Fact]
     public async Task TickAsync_为每个匹配会话使用配置HostId上报且不携带OSC终端原文()
     {
         const string hostId = "9e01c440-8e39-4b84-9af7-67455467a837";
@@ -95,6 +106,23 @@ public sealed class DaemonServiceTests
 
         var reported = Assert.Single(reporter.StateEvents);
         Assert.EndsWith("/beta", reported.SessionId, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task TickAsync_未就绪时不扫描或上报会话()
+    {
+        var reporter = new NotReadyReporter();
+        var service = CreateService(
+            new FakeMonitor(new Dictionary<string, string>
+            {
+                ["alpha"] = "\u001b]9;agent_state=awaiting_approval;files=1\a"
+            }),
+            reporter);
+
+        await RunOneTickAsync(service);
+
+        Assert.Empty(reporter.StateEvents);
+        Assert.Empty(reporter.LifecycleEvents);
     }
 
     [Fact]
@@ -193,6 +221,25 @@ public sealed class DaemonServiceTests
             return Task.FromResult(ReportResult.Accepted);
         }
 
+        public Task<bool> PingAsync(CancellationToken ct = default) => Task.FromResult(true);
+    }
+
+    private sealed class NotReadyReporter : IApiReporter
+    {
+        public List<AgentStateEvent> StateEvents { get; } = [];
+        public List<SessionLifecycleEvent> LifecycleEvents { get; } = [];
+
+        public Task<bool> IsReadyToReportAsync(CancellationToken ct = default) => Task.FromResult(false);
+        public Task<ReportResult> ReportAgentStateAsync(AgentStateEvent stateEvent, CancellationToken ct = default)
+        {
+            StateEvents.Add(stateEvent);
+            return Task.FromResult(ReportResult.Accepted);
+        }
+        public Task<ReportResult> ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default)
+        {
+            LifecycleEvents.Add(lifecycleEvent);
+            return Task.FromResult(ReportResult.Accepted);
+        }
         public Task<bool> PingAsync(CancellationToken ct = default) => Task.FromResult(true);
     }
 

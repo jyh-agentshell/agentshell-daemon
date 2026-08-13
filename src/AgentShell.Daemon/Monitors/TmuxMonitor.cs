@@ -34,7 +34,7 @@ public sealed class TmuxMonitor : IMonitorTarget
     {
         try
         {
-            var result = await RunTmuxAsync("list-sessions -F '#{session_name}'", ct);
+            var result = await RunTmuxAsync("list-sessions -F #{session_name}", ct);
             if (result.ExitCode != 0) return [];
 
             IsHealthy = true;
@@ -71,6 +71,10 @@ public sealed class TmuxMonitor : IMonitorTarget
 
         return trimmed;
     }
+
+    // tmux 会话名允许的字符集：ASCII 字母、数字、点、下划线、短横线。
+    private static bool IsSafeSessionName(string value) =>
+        value.All(static c => char.IsAsciiLetterOrDigit(c) || c is '.' or '_' or '-');
 
     /// <inheritdoc />
     public async Task<string> CapturePaneAsync(string sessionName, CancellationToken ct = default)
