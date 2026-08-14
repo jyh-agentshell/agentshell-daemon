@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Net.Http.Json;
 using AgentShell.Daemon.Configuration;
+using AgentShell.Daemon.Serialization;
 using AgentShell.Daemon.Security;
 using AgentShell.Protocol.Models;
 using Microsoft.Extensions.Logging;
@@ -178,7 +179,7 @@ public sealed class TokenManager : IDisposable
                 return _retryCount < MaxRetries ? _currentToken : null;
             }
 
-            var renewResponse = await response.Content.ReadFromJsonAsync<RenewResponse>(cancellationToken: ct);
+            var renewResponse = await response.Content.ReadFromJsonAsync(DaemonJsonContext.Default.RenewResponse, ct);
 
             if (renewResponse == null || string.IsNullOrEmpty(renewResponse.AccessToken))
             {

@@ -85,7 +85,9 @@ sudo journalctl -u agentshell-daemon -n 50 --no-pager
 
 守护进程应以目标 SSH 用户而非 root 运行，配置目录只授予该用户写入权限。可以启用 `NoNewPrivileges`、`ProtectSystem=strict`、受限地址族等 systemd 加固项；但**不能设置 `PrivateTmp=true`**，因为 daemon 需要访问该用户 tmux 的 `/tmp/tmux-<uid>` socket。
 
-若二进制放在版本化发布目录，须为 SSH 客户端命令提供稳定路径，例如由管理员创建 `/usr/local/bin/agentshell-daemon` 的符号链接；升级时先验证新二进制及 SHA256，再原子切换链接并重启服务。不得使用 `curl | bash` 方式更新。
+若二进制放在版本化发布目录，须为 SSH 客户端命令提供稳定路径：管理员安装优先创建 `/usr/local/bin/agentshell-daemon`；无 root 权限时可创建 `~/.local/bin/agentshell-daemon`。Android 绑定命令先查找 `PATH`，再回退到该用户级路径。
+
+升级时先验证新二进制及 SHA256，再原子切换链接并重启服务。发布 CI 必须用裁剪后的 x64 单文件执行“生成绑定码 → 消费并验签”冒烟，防止反射 JSON 序列化在裁剪后失效。不得使用 `curl | bash` 方式更新。
 
 ## 构建
 

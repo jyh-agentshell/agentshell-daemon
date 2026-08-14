@@ -25,7 +25,7 @@ jobs:
         with:
           repository: jyh-agentshell/agentshell-protocol
           # 与 daemon 的 0.3.1 兼容窗口一起评审；不得随默认分支漂移。
-          ref: b0050f05edbd
+          ref: b0050f05edbd0d16399e09bbdd1ae18884200470
           path: agentshell-protocol
 
       - name: Setup .NET
@@ -63,7 +63,7 @@ jobs:
         with:
           repository: jyh-agentshell/agentshell-protocol
           # 发布产物必须使用与 build job 相同的已验证契约。
-          ref: b0050f05edbd
+          ref: b0050f05edbd0d16399e09bbdd1ae18884200470
           path: agentshell-protocol
 
       - name: Setup .NET
@@ -85,7 +85,21 @@ jobs:
         run: |
           mv ./publish/${{ matrix.runtime }}/agentshell-daemon ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }}
           chmod +x ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }}
-          ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }} --version
+          binary=./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }}
+          if [ "${{ matrix.runtime }}" = "linux-x64" ]; then
+            "$binary" --version
+            smoke_home="${{ runner.temp }}/agentshell-daemon-smoke"
+            mkdir -p "$smoke_home/.agentshell"
+            HOME="$smoke_home" "$binary" --generate-config > "$smoke_home/.agentshell/agentshell.toml"
+            binding_code=$(HOME="$smoke_home" "$binary" --generate-binding-code)
+            proof=$(printf '%s:%s' "$binding_code" ci-nonce | HOME="$smoke_home" "$binary" bind-verify)
+            test ! -e "$smoke_home/.agentshell/binding-code.state"
+            printf '%s' "$proof" | grep -q '"host_id"'
+            printf '%s' "$proof" | grep -q '"signature"'
+            printf '%s' "$proof" | grep -q '"public_key"'
+          else
+            file "$binary" | grep -q 'ARM aarch64'
+          fi
 
       - name: Generate SHA256
         run: |

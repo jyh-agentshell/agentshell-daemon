@@ -1,5 +1,6 @@
 using System.Net.Http.Json;
 using AgentShell.Daemon.Configuration;
+using AgentShell.Daemon.Serialization;
 using AgentShell.Protocol.Models;
 
 namespace AgentShell.Daemon.Security;
@@ -38,6 +39,7 @@ public sealed class HostKeyRegistrar
         using var response = await _httpClient.PostAsJsonAsync(
             endpoint,
             new RegisterHostKeyRequest(registrationToken, _config.Reporting.HostId, Convert.ToBase64String(publicKey)),
+            DaemonJsonContext.Default.RegisterHostKeyRequest,
             cancellationToken);
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException($"主机公钥登记被服务器拒绝（HTTP {(int)response.StatusCode}）。");

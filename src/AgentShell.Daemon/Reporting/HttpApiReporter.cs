@@ -3,6 +3,7 @@ using System.Text.Json;
 using AgentShell.Daemon.Auth;
 using AgentShell.Daemon.Configuration;
 using AgentShell.Daemon.Security;
+using AgentShell.Daemon.Serialization;
 using AgentShell.Protocol.Models;
 using Microsoft.Extensions.Logging;
 
@@ -58,7 +59,9 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "sessions/report")
         {
-            Content = JsonContent.Create(CreateEnvelope("agent_state", stateEvent))
+            Content = JsonContent.Create(
+                CreateEnvelope("agent_state", stateEvent, DaemonJsonContext.Default.AgentStateEvent),
+                DaemonJsonContext.Default.ReportEnvelope)
         };
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
@@ -88,7 +91,9 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
 
         using var request = new HttpRequestMessage(HttpMethod.Post, "sessions/lifecycle")
         {
-            Content = JsonContent.Create(CreateEnvelope("session_lifecycle", lifecycleEvent))
+            Content = JsonContent.Create(
+                CreateEnvelope("session_lifecycle", lifecycleEvent, DaemonJsonContext.Default.SessionLifecycleEvent),
+                DaemonJsonContext.Default.ReportEnvelope)
         };
         request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
 
@@ -133,11 +138,14 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
     public static bool IsSecureApiBaseUrl(string? value) =>
         Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
 
-    private ReportEnvelope CreateEnvelope<T>(string payloadType, T payload) =>
+    private ReportEnvelope CreateEnvelope<T>(
+        string payloadType,
+        T payload,
+        System.Text.Json.Serialization.Metadata.JsonTypeInfo<T> jsonTypeInfo) =>
         _reportSigner.Sign(
             _hostId,
             payloadType,
-            JsonSerializer.SerializeToUtf8Bytes(payload),
+            JsonSerializer.SerializeToUtf8Bytes(payload, jsonTypeInfo),
             ["agent_state", "session_lifecycle"]);
 
     private static ReportResult ToReportResult(System.Net.HttpStatusCode statusCode) =>

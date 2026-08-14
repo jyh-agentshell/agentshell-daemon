@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text.Json;
+using AgentShell.Daemon.Serialization;
 
 namespace AgentShell.Daemon.Auth;
 
@@ -45,7 +46,7 @@ public sealed class BindingCodeStore(string statePath, TimeProvider clock)
     private StoredBindingCode? Load()
     {
         if (!File.Exists(_statePath)) return null;
-        try { return JsonSerializer.Deserialize<StoredBindingCode>(File.ReadAllText(_statePath)); }
+        try { return JsonSerializer.Deserialize(File.ReadAllText(_statePath), DaemonJsonContext.Default.StoredBindingCode); }
         catch (JsonException) { return null; }
     }
 
@@ -59,7 +60,7 @@ public sealed class BindingCodeStore(string statePath, TimeProvider clock)
         var temporary = _statePath + ".new";
         try
         {
-            File.WriteAllText(temporary, JsonSerializer.Serialize(state));
+            File.WriteAllText(temporary, JsonSerializer.Serialize(state, DaemonJsonContext.Default.StoredBindingCode));
             if (!OperatingSystem.IsWindows()) File.SetUnixFileMode(temporary, UnixFileMode.UserRead | UnixFileMode.UserWrite);
             File.Move(temporary, _statePath, true);
         }
@@ -71,5 +72,5 @@ public sealed class BindingCodeStore(string statePath, TimeProvider clock)
         if (File.Exists(_statePath)) File.Delete(_statePath);
     }
 
-    private sealed record StoredBindingCode(string Salt, string Hash, DateTimeOffset ExpiresAt);
+    internal sealed record StoredBindingCode(string Salt, string Hash, DateTimeOffset ExpiresAt);
 }
