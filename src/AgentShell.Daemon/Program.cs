@@ -132,6 +132,7 @@ host_id = ""{Guid.NewGuid()}""
 api_base_url = ""https://api.agentshell.dev/v1""
 # 上报间隔（毫秒）
 report_interval_ms = 1000
+full_sync_interval_seconds = 30
 
 [lan]
 # 是否启用局域网直连模式

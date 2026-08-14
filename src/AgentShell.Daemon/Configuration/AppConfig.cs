@@ -70,6 +70,9 @@ public sealed record AppConfig
         if (Reporting.ReportIntervalMs <= 0)
             throw new InvalidOperationException("reporting.report_interval_ms 必须 > 0");
 
+        if (Reporting.FullSyncIntervalSeconds <= 0)
+            throw new InvalidOperationException("reporting.full_sync_interval_seconds 必须 > 0");
+
         if (!Guid.TryParse(Reporting.HostId, out _))
             throw new InvalidOperationException("reporting.host_id 必须是有效 UUID");
 
@@ -127,6 +130,8 @@ public sealed record ReportingConfig
     public string HostId { get; init; } = string.Empty;
     public string ApiBaseUrl { get; init; } = "https://api.agentshell.dev/v1";
     public int ReportIntervalMs { get; init; } = 1000;
+    /// <summary>即使状态未变化也重新上报的间隔，用于服务端重启后自动收敛。</summary>
+    public int FullSyncIntervalSeconds { get; init; } = 30;
 
     internal static ReportingConfig FromToml(TomlTable t)
     {
@@ -134,6 +139,7 @@ public sealed record ReportingConfig
         if (t.TryGetValue("host_id", out var hostId)) c = c with { HostId = hostId?.ToString() ?? string.Empty };
         if (t.TryGetValue("api_base_url", out var v)) c = c with { ApiBaseUrl = v?.ToString() ?? c.ApiBaseUrl };
         if (t.TryGetValue("report_interval_ms", out var ri) && ri is long lri) c = c with { ReportIntervalMs = (int)lri };
+        if (t.TryGetValue("full_sync_interval_seconds", out var fs) && fs is long lfs) c = c with { FullSyncIntervalSeconds = (int)lfs };
         return c;
     }
 }

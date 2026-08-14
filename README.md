@@ -53,6 +53,7 @@ poll_interval_ms = 500
 host_id = "由 --generate-config 自动生成"
 api_base_url = "https://api.agentshell.dev/v1"
 report_interval_ms = 1000
+full_sync_interval_seconds = 30
 
 [lan]
 enabled = true

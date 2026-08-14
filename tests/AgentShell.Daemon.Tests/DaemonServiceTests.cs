@@ -143,6 +143,38 @@ public sealed class DaemonServiceTests
         Assert.Single(reporter.StateEvents);
     }
 
+    [Fact]
+    public async Task TickAsync_状态未变化时到达全量刷新间隔会再次上报()
+    {
+        var reporter = new RecordingReporter();
+        var timeProvider = new ManualTimeProvider(DateTimeOffset.Parse("2026-08-15T00:00:00Z"));
+        var service = new DaemonService(
+            new FakeMonitor(new Dictionary<string, string>
+            {
+                ["alpha"] = "\u001b]9;agent_state=running\a"
+            }),
+            reporter,
+            new AppConfig
+            {
+                Reporting = new ReportingConfig
+                {
+                    HostId = "9e01c440-8e39-4b84-9af7-67455467a837",
+                    FullSyncIntervalSeconds = 30
+                }
+            },
+            NullLogger<DaemonService>.Instance,
+            timeProvider);
+
+        await RunOneTickAsync(service);
+        timeProvider.Advance(TimeSpan.FromSeconds(29));
+        await RunOneTickAsync(service);
+        Assert.Single(reporter.StateEvents);
+
+        timeProvider.Advance(TimeSpan.FromSeconds(1));
+        await RunOneTickAsync(service);
+        Assert.Equal(2, reporter.StateEvents.Count);
+    }
+
     private static DaemonService CreateService(IMonitorTarget monitor, IApiReporter reporter) =>
         new(
             monitor,
@@ -263,5 +295,12 @@ public sealed class DaemonServiceTests
         public Task<ReportResult> ReportSessionLifecycleAsync(SessionLifecycleEvent lifecycleEvent, CancellationToken ct = default) => Task.FromResult(ReportResult.Accepted);
 
         public Task<bool> PingAsync(CancellationToken ct = default) => Task.FromResult(true);
+    }
+
+    private sealed class ManualTimeProvider(DateTimeOffset utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = utcNow;
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+        public void Advance(TimeSpan value) => _utcNow += value;
     }
 }

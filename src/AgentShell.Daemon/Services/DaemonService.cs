@@ -20,6 +20,7 @@ public sealed class DaemonService : BackgroundService
     private readonly IApiReporter _reporter;
     private readonly AppConfig _config;
     private readonly ILogger<DaemonService> _logger;
+    private readonly TimeProvider _timeProvider;
     private readonly string _daemonVersion;
 
     // 每个会话独立追踪状态，避免多个会话相互覆盖。
@@ -57,13 +58,15 @@ public sealed class DaemonService : BackgroundService
         IMonitorTarget monitor,
         IApiReporter reporter,
         AppConfig config,
-        ILogger<DaemonService> logger)
+        ILogger<DaemonService> logger,
+        TimeProvider? timeProvider = null)
     {
         _monitor = monitor;
         _reporter = reporter;
         _config = config;
         _logger = logger;
-        _daemonVersion = GetType().Assembly.GetName().Version?.ToString() ?? "0.2.0";
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _daemonVersion = GetType().Assembly.GetName().Version?.ToString() ?? "0.3.1";
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -125,17 +128,23 @@ public sealed class DaemonService : BackgroundService
                         _logger.LogInformation("会话 {Session} 检测到 Agent: {AgentType}", sessionName, agentType);
                 }
 
-                if (wasTracked && newState == previous!.State)
+                var now = _timeProvider.GetUtcNow();
+                var fullSyncDue = wasTracked
+                    && now - previous!.LastReportedAt >= TimeSpan.FromSeconds(_config.Reporting.FullSyncIntervalSeconds);
+                if (wasTracked && newState == previous!.State && !fullSyncDue)
                     continue;
 
                 var previousState = wasTracked ? previous!.State : AgentState.Idle;
-                _logger.LogInformation("状态变更: {SessionId} {PreviousState}→{State}（来源: {Source}）",
-                    sessionId, previousState, newState, source);
+                if (fullSyncDue && newState == previous!.State)
+                    _logger.LogDebug("周期刷新状态: {SessionId} {State}", sessionId, newState);
+                else
+                    _logger.LogInformation("状态变更: {SessionId} {PreviousState}→{State}（来源: {Source}）",
+                        sessionId, previousState, newState, source);
 
                 var evt = new AgentStateEvent
                 {
                     EventId = Guid.NewGuid().ToString(),
-                    Timestamp = DateTimeOffset.UtcNow,
+                    Timestamp = now,
                     SessionId = sessionId,
                     AgentType = agentType,
                     State = newState,
@@ -149,7 +158,7 @@ public sealed class DaemonService : BackgroundService
                 var result = await _reporter.ReportAgentStateAsync(evt, ct);
                 if (result == ReportResult.Accepted)
                 {
-                    _sessionStates[sessionName] = new SessionState(newState, agentType);
+                    _sessionStates[sessionName] = new SessionState(newState, agentType, now);
                 }
                 else
                 {
@@ -386,5 +395,5 @@ public sealed class DaemonService : BackgroundService
     private string BuildSessionId(string sessionName) =>
         $"{_config.Reporting.HostId}/{_monitor.Type}/{sessionName}";
 
-    private sealed record SessionState(AgentState State, AgentType AgentType);
+    private sealed record SessionState(AgentState State, AgentType AgentType, DateTimeOffset LastReportedAt);
 }
