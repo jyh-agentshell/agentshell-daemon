@@ -142,7 +142,7 @@ Environment=DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
-PrivateTmp=yes
+PrivateTmp=no
 ReadWritePaths=${REAL_HOME}/.agentshell
 
 [Install]
@@ -160,5 +160,5 @@ log_info "═══════════════════════�
 log_info "  服务状态: systemctl status ${SERVICE_NAME}"
 log_info "  配置文件: ${CONFIG_DIR}/agentshell.toml"
 log_info "  日志:     journalctl -u ${SERVICE_NAME} -f"
-log_warn "  设备绑定尚未实现；当前安装不会生成可用于服务端绑定的绑定码。"
+log_info "  设备绑定请按 README 中的 Android SSH 挑战—应答流程完成。"
 log_info "════════════════════════════════════════════════"
