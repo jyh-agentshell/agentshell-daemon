@@ -112,10 +112,31 @@ jobs:
           cd ./publish/${{ matrix.runtime }}
           sha256sum agentshell-daemon-${{ matrix.suffix }} > agentshell-daemon-${{ matrix.suffix }}.sha256
 
-      - name: Upload to Release
+      - name: Upload publish artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daemon-${{ matrix.suffix }}
+          path: |
+            ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }}
+            ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }}.sha256
+          if-no-files-found: error
+
+  release-assets:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: release
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download publish artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: daemon-*
+          merge-multiple: true
+          path: ./release-assets
+
+      - name: Upload all assets to Release
         uses: softprops/action-gh-release@v2.2.1
         with:
           fail_on_unmatched_files: true
-          files: |
-            ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }}
-            ./publish/${{ matrix.runtime }}/agentshell-daemon-${{ matrix.suffix }}.sha256
+          files: ./release-assets/*
