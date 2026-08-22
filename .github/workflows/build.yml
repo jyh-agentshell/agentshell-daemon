@@ -35,6 +35,9 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: 校验共享 OpenAPI 契约
+        run: npx --yes @redocly/cli@latest lint agentshell-protocol/specs/api-v1.yaml
+
       - name: Restore
         run: dotnet restore ${{ env.PROJECT_PATH }}
 

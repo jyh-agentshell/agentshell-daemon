@@ -25,7 +25,8 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
     public HttpApiReporter(
         AppConfig config,
         TokenManager tokenManager,
-        ILogger<HttpApiReporter> logger)
+        ILogger<HttpApiReporter> logger,
+        TimeProvider? clock = null)
     {
         if (!IsSecureApiBaseUrl(config.Reporting.ApiBaseUrl))
             throw new InvalidOperationException("reporting.api_base_url 必须使用 HTTPS。");
@@ -35,7 +36,7 @@ public sealed class HttpApiReporter : IApiReporter, IDisposable
         _daemonVersion = GetType().Assembly.GetName().Version?.ToString() ?? "0.3.1";
         _hostId = config.Reporting.HostId;
         var (privateKey, _) = Ed25519KeyManager.LoadOrCreateKeyPair(config.Binding.KeyPath);
-        _reportSigner = new ReportSigner(privateKey, TimeProvider.System);
+        _reportSigner = new ReportSigner(privateKey, clock ?? TimeProvider.System);
 
         _httpClient = new HttpClient
         {

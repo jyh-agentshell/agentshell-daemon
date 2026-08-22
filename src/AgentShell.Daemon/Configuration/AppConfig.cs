@@ -128,7 +128,7 @@ public sealed record MonitorConfig
 public sealed record ReportingConfig
 {
     public string HostId { get; init; } = string.Empty;
-    public string ApiBaseUrl { get; init; } = "https://api.agentshell.dev/v1";
+    public string ApiBaseUrl { get; init; } = "https://agentshell.servicelab.cn/api";
     public int ReportIntervalMs { get; init; } = 1000;
     /// <summary>即使状态未变化也重新上报的间隔，用于服务端重启后自动收敛。</summary>
     public int FullSyncIntervalSeconds { get; init; } = 30;

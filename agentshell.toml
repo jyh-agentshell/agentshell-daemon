@@ -13,7 +13,7 @@ poll_interval_ms = 500
 # 主机唯一 UUID。此仓库文件是模板；请用 --generate-config 生成真实配置。
 host_id = "REPLACE_WITH_GENERATED_UUID"
 # .NET 网关 API 地址
-api_base_url = "https://api.agentshell.dev/v1"
+api_base_url = "https://agentshell.servicelab.cn/api"
 # 上报间隔（毫秒）
 report_interval_ms = 1000
 full_sync_interval_seconds = 30

@@ -34,6 +34,7 @@ public static class Program
                 // 配置系统
                 var config = AppConfig.Load();
                 services.AddSingleton(config);
+                services.AddSingleton(TimeProvider.System);
 
                 // 监控目标（根据配置选择复用器）
                 services.AddSingleton<IMonitorTarget>(sp =>
@@ -55,7 +56,7 @@ public static class Program
                     var config = sp.GetRequiredService<AppConfig>();
                     var store = sp.GetRequiredService<TokenStore>();
                     var logger = sp.GetRequiredService<ILogger<TokenManager>>();
-                    var tm = new TokenManager(config, store, logger);
+                    var tm = new TokenManager(config, store, logger, sp.GetRequiredService<TimeProvider>());
                     // 同步阻塞初始化（守护进程启动时必须完成）
                     tm.InitializeAsync().GetAwaiter().GetResult();
                     return tm;
@@ -129,7 +130,7 @@ poll_interval_ms = 500
 # 此 UUID 是本机唯一身份；请勿与其他主机复用
 host_id = ""{Guid.NewGuid()}""
 # .NET 网关 API 地址
-api_base_url = ""https://api.agentshell.dev/v1""
+api_base_url = ""https://agentshell.servicelab.cn/api""
 # 上报间隔（毫秒）
 report_interval_ms = 1000
 full_sync_interval_seconds = 30

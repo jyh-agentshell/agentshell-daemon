@@ -51,7 +51,7 @@ poll_interval_ms = 500
 [reporting]
 # 主机唯一 UUID。请使用 --generate-config 生成，勿在多台主机间复用。
 host_id = "由 --generate-config 自动生成"
-api_base_url = "https://api.agentshell.dev/v1"
+api_base_url = "https://agentshell.servicelab.cn/api"
 report_interval_ms = 1000
 full_sync_interval_seconds = 30
 

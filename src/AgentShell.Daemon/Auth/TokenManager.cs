@@ -25,6 +25,9 @@ public sealed class TokenManager : IDisposable
     private readonly ILogger<TokenManager> _logger;
     private readonly HttpClient _httpClient;
     private readonly JwtSecurityTokenHandler _jwtHandler;
+    private readonly TimeProvider _clock;
+    private readonly SemaphoreSlim _renewGate = new(1, 1);
+    private readonly bool _ownsHttpClient;
 
     private string? _currentToken;
     private State _state = State.AwaitingBinding;
@@ -45,12 +48,19 @@ public sealed class TokenManager : IDisposable
         TimeSpan.FromSeconds(16)
     ];
 
-    public TokenManager(AppConfig config, TokenStore store, ILogger<TokenManager> logger)
+    public TokenManager(
+        AppConfig config,
+        TokenStore store,
+        ILogger<TokenManager> logger,
+        TimeProvider? clock = null,
+        HttpClient? httpClient = null)
     {
         _config = config;
         _store = store;
         _logger = logger;
-        _httpClient = new HttpClient
+        _clock = clock ?? TimeProvider.System;
+        _ownsHttpClient = httpClient is null;
+        _httpClient = httpClient ?? new HttpClient
         {
             BaseAddress = new Uri(config.Reporting.ApiBaseUrl.TrimEnd('/') + "/")
         };
@@ -70,7 +80,7 @@ public sealed class TokenManager : IDisposable
         {
             _currentToken = saved;
             _tokenExpiry = ReadExpiry(saved);
-            if (_tokenExpiry > DateTime.UtcNow)
+            if (_tokenExpiry > _clock.GetUtcNow().UtcDateTime)
             {
                 _state = State.Active;
                 _logger.LogInformation("已加载本地 Token，过期时间: {Expiry:O}", _tokenExpiry);
@@ -94,28 +104,36 @@ public sealed class TokenManager : IDisposable
     /// </summary>
     public async Task<string?> GetAccessTokenAsync(CancellationToken ct = default)
     {
-        switch (_state)
+        // DaemonService 可能同时触发多个上报；续期请求带有一次性 anti-replay
+        // 标识，必须串行化，否则同一旧 Token 的并发续期会互相返回 409。
+        await _renewGate.WaitAsync(ct);
+        try
         {
-            case State.AwaitingBinding:
-                return null;
+            switch (_state)
+            {
+                case State.AwaitingBinding:
+                    return null;
 
-            case State.Active:
-                // 检查是否需要续期
-                if (DateTime.UtcNow + RenewalThreshold >= _tokenExpiry)
-                {
+                case State.Active:
+                    // 检查是否需要续期
+                    if (_clock.GetUtcNow().UtcDateTime + RenewalThreshold < _tokenExpiry)
+                        return _currentToken;
                     _state = State.Renewing;
-                    goto case State.Renewing;
-                }
-                return _currentToken;
+                    return await RenewTokenAsync(ct);
 
-            case State.Renewing:
-                return await RenewTokenAsync(ct);
+                case State.Renewing:
+                    return await RenewTokenAsync(ct);
 
-            case State.Retry:
-                return await RetryRenewAsync(ct);
+                case State.Retry:
+                    return await RetryRenewAsync(ct);
 
-            default:
-                return null;
+                default:
+                    return null;
+            }
+        }
+        finally
+        {
+            _renewGate.Release();
         }
     }
 
@@ -149,7 +167,7 @@ public sealed class TokenManager : IDisposable
                 return null;
             }
 
-            var timestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
+            var timestamp = _clock.GetUtcNow().ToUnixTimeSeconds();
             var message = System.Text.Encoding.UTF8.GetBytes($"renew:{jti}:{timestamp}");
 
             // 加载 Ed25519 密钥对
@@ -250,6 +268,8 @@ public sealed class TokenManager : IDisposable
 
     public void Dispose()
     {
-        _httpClient.Dispose();
+        if (_ownsHttpClient)
+            _httpClient.Dispose();
+        _renewGate.Dispose();
     }
 }

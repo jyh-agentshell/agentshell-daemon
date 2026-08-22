@@ -193,7 +193,7 @@ public sealed class DaemonService : BackgroundService
                 var lifecycleEvt = new SessionLifecycleEvent
                 {
                     EventId = Guid.NewGuid().ToString(),
-                    Timestamp = DateTimeOffset.UtcNow,
+                    Timestamp = _timeProvider.GetUtcNow(),
                 SessionId = BuildSessionId(session),
                     EventType = SessionEventType.Created,
                     MultiplexerType = MapMultiplexerType(_monitor.Type),
@@ -216,7 +216,7 @@ public sealed class DaemonService : BackgroundService
             var lifecycleEvt = new SessionLifecycleEvent
             {
                 EventId = Guid.NewGuid().ToString(),
-                Timestamp = DateTimeOffset.UtcNow,
+                Timestamp = _timeProvider.GetUtcNow(),
                     SessionId = BuildSessionId(session),
                 EventType = SessionEventType.Destroyed,
                 MultiplexerType = MapMultiplexerType(_monitor.Type),
